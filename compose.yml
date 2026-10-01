@@ -1,0 +1,20 @@
+# Claude Code в контейнере: docker compose run --rm claude [флаги claude]
+services:
+  claude:
+    image: maksim44/claude-box
+    # обычный docker compose up проекта этот сервис пропускает
+    profiles: [claude]
+    stdin_open: true
+    tty: true
+    # переменные .env проекта — в окружение контейнера, для MCP-серверов и команд агента; ключи входа Claude Code скрипт запуска убирает
+    env_file:
+      - path: .env
+        required: false
+    # папка проекта — под своим именем: сессии, автопамять и доверие Claude Code в общей домашней папке привязаны к пути
+    working_dir: /workspace/${COMPOSE_PROJECT_NAME}
+    volumes:
+      - .:/workspace/${COMPOSE_PROJECT_NAME}
+      # домашняя папка контейнера, общая для всех проектов машины: логин, история сессий, сам Claude Code
+      - ~/.claude-box:/home/node
+      # домашняя папка хоста, только на чтение: скрипт запуска берёт оттуда CLAUDE.md, хуки, строку состояния, настройки и .gitconfig — что найдёт; агенту она закрыта
+      - ~:/root/host-home:ro
