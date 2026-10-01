@@ -100,3 +100,40 @@
 - https://code.claude.com/docs/en/cli-reference — описание `--max-turns`
 - https://code.claude.com/docs/en/how-claude-code-works — § When context fills up: автокомпакция
 - https://code.claude.com/docs/en/headless — note про `--bare` как будущий дефолт `-p`
+
+## Часть 4. Дополнение 2026-10-01 — пробы строки итерации (CLI 2.1.287)
+
+### Методика
+
+- Тестовый git-репозиторий: копия `/box-next` из образца и два таск-файла — со статусом «готово» и со статусом «в работе» и одним шагом.
+- Запуск из контейнера под `node` через `env -i HOME=… PATH=… LANG=C.UTF-8 CONTEXT_GUARD_MODE=protocol` — окружение как у движка на хосте, без переменных родительской сессии агента. Флаги — строка хоста из `ARCHITECTURE.md` § Движок автоцикла: `--permission-mode auto --permission-prompts none --output-format json --max-turns 200`.
+- Код выхода — `$?`; сигналы — `timeout --preserve-status -s TERM|INT 12`; нет логина — `CLAUDE_CONFIG_DIR` на пустую папку.
+
+### Исходы
+
+| Проба | Код | stdout |
+|---|---|---|
+| `/box-next` на задаче «готово» | 0 | `is_error: false`, `subtype: success`, `terminal_reason: completed`, `num_turns: 2`, ответ «статус „готово“, правок нет» в `result` |
+| `--max-turns 2` на задаче «в работе» | 1 | `is_error: true`, `subtype: error_max_turns`, `terminal_reason: max_turns`, `num_turns: 3`, `result` нет, `errors: ["Reached maximum number of turns (2)"]` |
+| нет логина | 1 | `is_error: true`, `subtype: success`, `terminal_reason: api_error`, `result: "Not logged in · Please run /login"`, `session_id` есть |
+| неверный флаг | 1 | пусто; stderr `error: unknown option '--no-such-flag'` |
+| SIGTERM через 12 с | 143 | пусто |
+| SIGINT через 12 с | 0 | `is_error: true`, `subtype: error_during_execution`, `terminal_reason: aborted_streaming`, `result` нет |
+
+- Раскрытие скилла — по журналу сессии: первое сообщение — `<command-name>/box-next</command-name>` с аргументом, следом мета-сообщение с телом `SKILL.md`, где `$ARGUMENTS` заменён именем задачи. Модель скилл не читала — раскрытие сделал CLI.
+- Ключи JSON итога: `session_id`, `is_error`, `subtype`, `terminal_reason`, `stop_reason`, `num_turns`, `total_cost_usd`, `permission_denials`, `api_error_status`, `duration_ms`, `usage`, `modelUsage`, `subagent_stats`; `result` — у дошедшей до ответа сессии, `errors` — у прерванной.
+- Расхождения с разбором итога в архитектуре: SIGINT даёт код 0 при `is_error: true`; SIGTERM и неверный флаг не дают JSON и `session_id`.
+
+### Дока на 2026-10-01
+
+- Стартовый режим `-p` — `default` (Manual) в сессиях, загружающих флаги функций; без загрузки — сторонний провайдер, выключенная телеметрия — `auto` с CLI 2.1.285. Интерактивная сессия с CLI 2.1.283 стартует в auto на любом плане.
+- Повторные отказы классификатора в `-p` без `--permission-prompt-tool`: действие не выполняется, сессия работает дальше, прогон не останавливается.
+- `--permission-prompts none` — CLI ≥ 2.1.259; `--max-turns` — в таблице флагов: «Exits with an error when the limit is reached»; SIGTERM — код 143; `--resume <id>` из любого каталога — с 2.1.223; `--bare` по-прежнему «will become the default for -p in a future release».
+- Ошибка внутри прогона, например нет логина, печатается итогом в stdout; ошибка флага — в stderr до старта.
+
+### Источники дополнения
+
+- https://code.claude.com/docs/en/cli-reference — флаги CLI
+- https://code.claude.com/docs/en/headless — коды выхода, SIGTERM, скиллы в `-p`, `--permission-prompts`
+- https://code.claude.com/docs/en/permission-modes — § Which mode a session starts in, § Repeated-block thresholds
+- https://code.claude.com/docs/en/agent-sdk/typescript — `SDKResultMessage`, значения `subtype`
