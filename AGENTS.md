@@ -4,7 +4,7 @@
 
 ## Суть проекта
 
-agent-box — обвязка проектов под работу с Claude Code (`docs/DESCRIPTION.md`). Продукт — три папки: образец проекта `template/`, скиллы контейнера `skills/` и образ `container/`; их файлы правятся как код. Хаб, документы и протокол в `template/` — правила проектов, куда ляжет образец; в этом проекте они не действуют: настройка `claudeMdExcludes` в `.claude/settings.json` выключает их для сессий этого репозитория. Сам репозиторий ведётся по обвязке своим каркасом в корне — `AGENTS.md`, `docs/`, `.claude/`.
+agent-box — обвязка проектов под работу с Claude Code (`docs/DESCRIPTION.md`). Продукт — три папки и скрипт: образец проекта `template/`, скиллы контейнера `skills/`, образ `container/` и движок автоцикла `agent-loop.sh`; их файлы правятся как код. Хаб, документы и протокол в `template/` — правила проектов, куда ляжет образец; в этом проекте они не действуют: настройка `claudeMdExcludes` в `.claude/settings.json` выключает их для сессий этого репозитория. Сам репозиторий ведётся по обвязке своим каркасом в корне — `AGENTS.md`, `docs/`, `.claude/`.
 
 ## Жёсткие ограничения
 
@@ -24,6 +24,7 @@ agent-box — обвязка проектов под работу с Claude Code
 - `skills/box-init/SKILL.md` — `/box-init`: заведение проекта и шаблон задачи сборки документации
 - `skills/box-init/documents.md` — карточки документов проекта
 - `skills/box-task/SKILL.md` — `/box-task`: заведение задачи
+- `agent-loop.sh` — движок автоцикла: итерации `/box-next` на хосте
 - `container/Dockerfile` — образ `claude-box`
 - `container/entrypoint.sh` — скрипт запуска контейнера
 - `container/settings.json` — базовые настройки образа с регистрацией хука context-guard
