@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Движок автоцикла: итерации /box-next по задаче проекта, пока статус таск-файла «в работе» или «блокер» с ответом пользователя.
-# Запуск на хосте из папки проекта: ~/<клон agent-box>/agent-loop.sh <задача>
+# Запуск на хосте из папки проекта: ~/<клон agent-box>/agent-loop.sh [--host] <задача>
+# Итерации идут в контейнере — сервисе claude проекта; --host — итерации claude хоста.
 # Уведомления в Telegram — при TELEGRAM_BOT_TOKEN и TELEGRAM_CHAT_ID в ~/.config/agent-loop.env, иначе остановки видны только в терминале.
 # Код выхода: 0 — «готово» или лимит итераций; 1 — остановка, ждущая пользователя; 2 — движок не запустился; 130 — Ctrl+C.
 set -u
@@ -50,9 +51,14 @@ stop() {
   exit "$code"
 }
 
-[ $# -eq 1 ] && [ -n "$1" ] || { echo 'запуск: agent-loop.sh <задача>' >&2; exit 2; }
+host=
+[ "${1:-}" = --host ] && { host=1; shift; }
+[ $# -eq 1 ] && [ -n "$1" ] || { echo 'запуск: agent-loop.sh [--host] <задача>' >&2; exit 2; }
 task=$1
-for cmd in git jq claude; do
+again="agent-loop.sh${host:+ --host} $task"
+run=docker
+[ -z "$host" ] || run=claude
+for cmd in git jq "$run"; do
   command -v "$cmd" >/dev/null || stop 2 "нет команды $cmd"
 done
 root=$(git rev-parse --show-toplevel 2>/dev/null) || stop 2 "папка вне git-репозитория: $PWD"
@@ -128,24 +134,31 @@ $(sed -n '/^## Блокер/,$p' "$file")"
     готово) stop 0 "задача $task — готово
 дальше: проверить сделанное по docs/JOURNAL.md и хвостам «Контекста» $file, затем чекбокс строке задачи в docs/ROADMAP.md" ;;
     *) stop 1 "задача $task — статус «$st» вне протокола
-дальше: первая строка $file — «статус: в работе», «статус: блокер» или «статус: готово»; затем agent-loop.sh $task снова" ;;
+дальше: первая строка $file — «статус: в работе», «статус: блокер» или «статус: готово»; затем $again снова" ;;
   esac
   [ "$idle" -lt "$max_idle" ] || stop 1 "задача $task — $max_idle итерации подряд без прогресса
-дальше: проверить docs/JOURNAL.md и «Контекст» $file, затем agent-loop.sh $task снова"
+дальше: проверить docs/JOURNAL.md и «Контекст» $file, затем $again снова"
   [ "$i" -lt "$max_iter" ] || stop 0 "задача $task — лимит $max_iter итераций за запуск, статус «в работе»
-дальше: agent-loop.sh $task снова — следующий запуск продолжит"
+дальше: $again снова — следующий запуск продолжит"
   if [ "$i" -gt 0 ]; then
     say "пауза $pause с — Ctrl+C останавливает цикл чисто"
     sleep "$pause"
     [ "$interrupted" = 0 ] || stop 130 "остановлен Ctrl+C в паузе: итерация $i закоммичена
-дальше: agent-loop.sh $task снова — следующий запуск продолжит"
+дальше: $again снова — следующий запуск продолжит"
+  elif [ -z "$host" ]; then
+    # сервис claude проекта — перед первой итерацией в контейнере
+    services=$(docker compose --profile claude config --services 2>&1)
+    grep -qx claude <<<"$services" || stop 2 "нет сервиса claude в compose-файле проекта — его кладёт /box-init; итерации на хосте — agent-loop.sh --host $task
+$services"
   fi
 
   i=$((i + 1))
   head=$(git rev-parse HEAD)
-  # идентификатор сессии задаётся до запуска: его называет алерт таймера, пока итерация идёт
+  # идентификатор сессии задаётся до запуска: его называет алерт таймера, пока итерация идёт.
+  # Сессии контейнера лежат в его домашней папке — доследование тоже через сервис claude
   sid=$(cat /proc/sys/kernel/random/uuid)
   resume="claude --resume $sid"
+  [ -n "$host" ] || resume="docker compose run --rm $resume"
   say "задача $task — итерация $i/$max_iter, $(date +%H:%M), сессия $sid"
 
   # таймер итерации: порог пройден — алерт, итерация идёт дальше
@@ -159,8 +172,16 @@ $(sed -n '/^## Блокер/,$p' "$file")"
     notify "$msg"
   ) &
   timer=$!
-  CONTEXT_GUARD_MODE=protocol claude -p "/box-next $task" --session-id "$sid" --permission-mode auto \
-    --permission-prompts none --output-format json --max-turns "$max_turns" >"$tmp/out" 2>"$tmp/err"
+  args=(-p "/box-next $task" --session-id "$sid" --permission-mode auto --permission-prompts none
+    --output-format json --max-turns "$max_turns")
+  # контейнер: -T — stdout с JSON итога отдельно от stderr; ввод — /dev/null: -p добавляет поданный ввод к промпту,
+  # а открытый ввод контейнера не кончается; --progress quiet — в stderr только ошибки.
+  # Код выхода claude compose возвращает; на Ctrl+C отдаёт SIGINT сессии и сам выходит с 130, не дожидаясь итога
+  if [ -n "$host" ]; then
+    CONTEXT_GUARD_MODE=protocol claude "${args[@]}"
+  else
+    docker compose --progress quiet run --rm -T -e CONTEXT_GUARD_MODE=protocol claude "${args[@]}" </dev/null
+  fi >"$tmp/out" 2>"$tmp/err"
   code=$?
   kill "$timer" 2>/dev/null
 
@@ -169,24 +190,24 @@ $(sed -n '/^## Блокер/,$p' "$file")"
   json=0
   jq -se 'length == 1 and (.[0] | type == "object")' "$tmp/out" >/dev/null 2>&1 && json=1
   [ "$interrupted" = 0 ] || stop 130 "остановлен Ctrl+C во время итерации $i: в дереве могут быть правки без коммита
-дальше: git status, доследование — $resume; затем agent-loop.sh $task снова"
+дальше: git status, доследование — $resume; затем $again снова"
   if [ "$json" = 0 ]; then
     error=$(tail -n 5 "$tmp/err")
     stop 1 "итерация $i упала: код $code, итога JSON нет${error:+
 $error}
-дальше: доследование — $resume, если сессия успела начаться; затем agent-loop.sh $task снова"
+дальше: доследование — $resume, если сессия успела начаться; затем $again снова"
   fi
   if [ "$code" != 0 ] || [ "$(jq -r '.is_error' "$tmp/out")" != false ]; then
     error=$(jq -r '(.result // empty), (.errors // [] | .[])' "$tmp/out")
     stop 1 "итерация $i упала: код $code, terminal_reason $(jq -r '.terminal_reason' "$tmp/out")${error:+
 $error}
-дальше: доследование — $resume; затем agent-loop.sh $task снова"
+дальше: доследование — $resume; затем $again снова"
   fi
 
   dirty=$(git status --porcelain)
   [ -z "$dirty" ] || stop 1 "итерация $i оставила правки без коммита:
 $dirty
-дальше: доследование — $resume; правки закоммитить или откатить, затем agent-loop.sh $task снова"
+дальше: доследование — $resume; правки закоммитить или откатить, затем $again снова"
   say "итерация $i закончена: ходов $(jq -r '.num_turns' "$tmp/out"), сессия $sid"
 
   # прогресс: закрыт чекбокс очереди или дифф итерации шире служебных файлов завершения

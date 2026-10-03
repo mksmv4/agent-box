@@ -25,7 +25,7 @@ agent-box — обвязка проектов под работу с Claude Code
 - `skills/box-init/documents.md` — карточки документов проекта
 - `skills/box-task/SKILL.md` — `/box-task`: заведение задачи
 - `skills/box-update/SKILL.md` — `/box-update`: свежие протокол и `/box-next` в проекте
-- `agent-loop.sh` — движок автоцикла: итерации `/box-next` на хосте
+- `agent-loop.sh` — движок автоцикла на хосте: итерации `/box-next` в контейнере проекта или на хосте
 - `container/Dockerfile` — образ `claude-box`
 - `container/entrypoint.sh` — скрипт запуска контейнера
 - `container/settings.json` — базовые настройки образа с регистрацией хука context-guard
