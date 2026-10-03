@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Движок автоцикла: итерации /box-next по задаче проекта, пока статус таск-файла «в работе» или «блокер» с ответом пользователя.
-# Запуск на хосте из папки проекта: ~/<клон agent-box>/agent-loop.sh [--host] <задача>
+# Запуск на хосте из папки проекта: agent-loop.sh [--host] <задача>
+# Первый раз на машине — ./agent-loop.sh в папке клона: скрипт ставит себя командой agent-loop.sh ссылкой в ~/.local/bin.
 # Итерации идут в контейнере — сервисе claude проекта; --host — итерации claude хоста.
 # Уведомления в Telegram — при TELEGRAM_BOT_TOKEN и TELEGRAM_CHAT_ID в ~/.config/agent-loop.env, иначе остановки видны только в терминале.
 # Код выхода: 0 — «готово» или лимит итераций; 1 — остановка, ждущая пользователя; 2 — движок не запустился; 130 — Ctrl+C.
@@ -51,11 +52,27 @@ stop() {
   exit "$code"
 }
 
+# команда agent-loop.sh по имени: ссылка на этот скрипт в ~/.local/bin; папки нет в PATH — запуск полным адресом.
+# Ссылка от перенесённого клона заменяется. me — команда запуска в подсказках движка
+me=agent-loop.sh
+if ! command -v agent-loop.sh >/dev/null; then
+  self=$(realpath "$0")
+  case ":$PATH:" in
+    *":$HOME/.local/bin:"*)
+      mkdir -p ~/.local/bin && ln -sf "$self" ~/.local/bin/agent-loop.sh &&
+        say "agent-loop.sh теперь запускается по имени из любой папки" ;;
+    *)
+      me=$self
+      say "папки ~/.local/bin нет в PATH — запуск полным адресом" ;;
+  esac
+fi
+
 host=
 [ "${1:-}" = --host ] && { host=1; shift; }
-[ $# -eq 1 ] && [ -n "$1" ] || { echo 'запуск: agent-loop.sh [--host] <задача>' >&2; exit 2; }
+[ $# -eq 0 ] && { say "запуск из папки проекта: $me [--host] <задача>"; exit 0; }
+[ $# -eq 1 ] && [ -n "$1" ] || { echo "запуск: $me [--host] <задача>" >&2; exit 2; }
 task=$1
-again="agent-loop.sh${host:+ --host} $task"
+again="$me${host:+ --host} $task"
 run=docker
 [ -z "$host" ] || run=claude
 for cmd in git jq "$run"; do
@@ -124,7 +141,7 @@ while :; do
   case $st in
     'в работе') ;;
     блокер)
-      # секция кончается строкой «Дальше:» сессии — она последняя строка уведомления
+      # секция кончается строкой «Как ответить:» сессии — она последняя строка уведомления
       answered || stop 1 "задача $task — блокер
 $(sed -n '/^## Блокер/,$p' "$file")"
       # блокер с ответом снят: статус «в работе» в рабочем дереве, его забирает коммит итерации
@@ -148,7 +165,7 @@ $(sed -n '/^## Блокер/,$p' "$file")"
   elif [ -z "$host" ]; then
     # сервис claude проекта — перед первой итерацией в контейнере
     services=$(docker compose --profile claude config --services 2>&1)
-    grep -qx claude <<<"$services" || stop 2 "нет сервиса claude в compose-файле проекта — его кладёт /box-init; итерации на хосте — agent-loop.sh --host $task
+    grep -qx claude <<<"$services" || stop 2 "нет сервиса claude в compose-файле проекта — его кладёт /box-init; итерации на хосте — $me --host $task
 $services"
   fi
 
