@@ -1,7 +1,12 @@
 # Claude Code в контейнере: docker compose run --rm claude [флаги claude]
+# Сборка образа: docker compose build claude
 services:
   claude:
     image: maksim44/claude-box
+    # сборка — только в клоне agent-box: образец проекта в template/ берёт готовый образ
+    build:
+      context: .
+      dockerfile: container/Dockerfile
     # обычный docker compose up проекта этот сервис пропускает
     profiles: [claude]
     stdin_open: true

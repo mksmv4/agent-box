@@ -1,6 +1,6 @@
 # Образ claude-box: Claude Code в терминале контейнера, образец проекта и скиллы обвязки.
 # Сам Claude Code ставится при первом старте в volume домашней папки.
-# Сборка — из корня репозитория agent-box: docker build -t maksim44/claude-box -f container/Dockerfile .
+# Сборка — из корня репозитория agent-box: docker compose build claude
 FROM node:20
 
 # jq — сборка настроек при старте и хук context-guard; python3-venv — виртуальные окружения и pip для Python-проектов
