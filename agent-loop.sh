@@ -21,12 +21,22 @@ tg_api() {
     curl -sS --max-time 10 -K - "$@" 2>&1
 }
 
-# уведомление в Telegram, когда известны токен и chat_id (tg=1)
+# уведомление в Telegram, когда известны токен и chat_id (tg=1).
+# Текст до 4000 символов — сообщением: предел Telegram 4096. Длиннее — файлом .md целиком;
+# в подписи (предел 1024) — начало текста и последняя строка: там сказано, что делать дальше
 tg=
 notify() {
   [ -n "$tg" ] || return 0
-  local text="$project: $1" resp
-  resp=$(tg_api sendMessage --data-urlencode "chat_id=$TELEGRAM_CHAT_ID" --data-urlencode "text=${text:0:4000}")
+  local text="$project: $1" resp last
+  if [ "${#text}" -le 4000 ]; then
+    resp=$(tg_api sendMessage --data-urlencode "chat_id=$TELEGRAM_CHAT_ID" --data-urlencode "text=$text")
+  else
+    last=${text##*$'\n'}
+    printf '%s\n' "$text" >"$tmp/notify.md"
+    resp=$(tg_api sendDocument --form-string "chat_id=$TELEGRAM_CHAT_ID" \
+      --form-string "caption=${text:0:600}…"$'\n'"${last:0:400}" \
+      -F "document=@$tmp/notify.md;filename=$project-$task.md")
+  fi
   jq -e .ok <<<"$resp" >/dev/null 2>&1 ||
     say "уведомление в Telegram не ушло: $(jq -r .description <<<"$resp" 2>/dev/null || printf %s "$resp")"
 }
@@ -109,27 +119,33 @@ while :; do
     'в работе') ;;
     блокер)
       answered || stop 1 "задача $task — блокер
-$(sed -n '/^## Блокер/,$p' "$file")"
+$(sed -n '/^## Блокер/,$p' "$file")
+дальше: в секцию «Блокер» $file — строка «ответ: …», «как предложено» или свой вариант; затем agent-loop.sh $task снова"
       # блокер с ответом снят: статус «в работе» в рабочем дереве, его забирает коммит итерации
       sed -i '1s/.*/статус: в работе/' "$file"
       say "задача $task — ответ на блокер найден, статус «в работе»"
       ;;
-    готово) stop 0 "задача $task — готово" ;;
-    *) stop 1 "задача $task — статус «$st» вне протокола" ;;
+    готово) stop 0 "задача $task — готово
+дальше: проверить сделанное по docs/JOURNAL.md и хвостам «Контекста» $file, затем чекбокс строке задачи в docs/ROADMAP.md" ;;
+    *) stop 1 "задача $task — статус «$st» вне протокола
+дальше: первая строка $file — «статус: в работе», «статус: блокер» или «статус: готово»; затем agent-loop.sh $task снова" ;;
   esac
-  [ "$idle" -lt "$max_idle" ] || stop 1 "задача $task — $max_idle итерации подряд без прогресса: проверить журнал и «Контекст», затем запустить снова"
-  [ "$i" -lt "$max_iter" ] || stop 0 "задача $task — лимит $max_iter итераций за запуск; статус «в работе», следующий запуск продолжит"
+  [ "$idle" -lt "$max_idle" ] || stop 1 "задача $task — $max_idle итерации подряд без прогресса
+дальше: проверить docs/JOURNAL.md и «Контекст» $file, затем agent-loop.sh $task снова"
+  [ "$i" -lt "$max_iter" ] || stop 0 "задача $task — лимит $max_iter итераций за запуск, статус «в работе»
+дальше: agent-loop.sh $task снова — следующий запуск продолжит"
   if [ "$i" -gt 0 ]; then
     say "пауза $pause с — Ctrl+C останавливает цикл чисто"
     sleep "$pause"
-    [ "$interrupted" = 0 ] || stop 130 "остановлен Ctrl+C в паузе: итерация $i закоммичена"
+    [ "$interrupted" = 0 ] || stop 130 "остановлен Ctrl+C в паузе: итерация $i закоммичена
+дальше: agent-loop.sh $task снова — следующий запуск продолжит"
   fi
 
   i=$((i + 1))
   head=$(git rev-parse HEAD)
   # идентификатор сессии задаётся до запуска: его называет алерт таймера, пока итерация идёт
   sid=$(cat /proc/sys/kernel/random/uuid)
-  resume="сессия $sid — claude --resume $sid"
+  resume="claude --resume $sid"
   say "задача $task — итерация $i/$max_iter, $(date +%H:%M), сессия $sid"
 
   # таймер итерации: порог пройден — алерт, итерация идёт дальше
@@ -137,7 +153,8 @@ $(sed -n '/^## Блокер/,$p' "$file")"
     trap 'kill $! 2>/dev/null; exit' TERM
     sleep "$alert" &
     wait
-    msg="задача $task — итерация $i идёт дольше $((alert / 60)) мин, сессия $sid; итерация продолжается"
+    msg="задача $task — итерация $i идёт дольше $((alert / 60)) мин, сессия $sid; итерация продолжается
+дальше: ждать; вмешательство — $resume или Ctrl+C в терминале движка"
     say "$msg"
     notify "$msg"
   ) &
@@ -151,25 +168,25 @@ $(sed -n '/^## Блокер/,$p' "$file")"
   # -s ловит и пустой stdout: jq 1.6 с одним -e пропускает его с кодом 0
   json=0
   jq -se 'length == 1 and (.[0] | type == "object")' "$tmp/out" >/dev/null 2>&1 && json=1
-  [ "$interrupted" = 0 ] || stop 130 "остановлен Ctrl+C во время итерации $i: в дереве могут быть правки без коммита, git status
-$resume"
+  [ "$interrupted" = 0 ] || stop 130 "остановлен Ctrl+C во время итерации $i: в дереве могут быть правки без коммита
+дальше: git status, доследование — $resume; затем agent-loop.sh $task снова"
   if [ "$json" = 0 ]; then
-    resume="итога JSON нет; если сессия успела начаться — claude --resume $sid"
     error=$(tail -n 5 "$tmp/err")
-    stop 1 "итерация $i упала: код $code, $resume${error:+
-$error}"
+    stop 1 "итерация $i упала: код $code, итога JSON нет${error:+
+$error}
+дальше: доследование — $resume, если сессия успела начаться; затем agent-loop.sh $task снова"
   fi
   if [ "$code" != 0 ] || [ "$(jq -r '.is_error' "$tmp/out")" != false ]; then
     error=$(jq -r '(.result // empty), (.errors // [] | .[])' "$tmp/out")
     stop 1 "итерация $i упала: код $code, terminal_reason $(jq -r '.terminal_reason' "$tmp/out")${error:+
 $error}
-$resume"
+дальше: доследование — $resume; затем agent-loop.sh $task снова"
   fi
 
   dirty=$(git status --porcelain)
   [ -z "$dirty" ] || stop 1 "итерация $i оставила правки без коммита:
 $dirty
-$resume"
+дальше: доследование — $resume; правки закоммитить или откатить, затем agent-loop.sh $task снова"
   say "итерация $i закончена: ходов $(jq -r '.num_turns' "$tmp/out"), сессия $sid"
 
   # прогресс: закрыт чекбокс очереди или дифф итерации шире служебных файлов завершения
