@@ -3,12 +3,13 @@
 # Сборка — из корня репозитория agent-box: docker compose build claude
 FROM node:20
 
-# jq — сборка настроек при старте и хук context-guard; python3-venv — виртуальные окружения и pip для Python-проектов
+# jq — сборка настроек при старте и хук context-guard; python3-venv — чтение .env проекта при старте, виртуальные окружения и pip для Python-проектов
 RUN apt-get update && apt-get install -y --no-install-recommends jq python3-venv \
  && rm -rf /var/lib/apt/lists/*
 
 COPY container/settings.json /etc/claude-box/settings.json
 COPY container/entrypoint.sh /usr/local/bin/claude-box
+COPY container/env-run.py /usr/local/bin/claude-box-env
 # образец проекта для /box-init; скиллы скрипт запуска кладёт в ~/.claude/skills
 COPY template/ /etc/claude-box/template/
 COPY skills/ /etc/claude-box/skills/

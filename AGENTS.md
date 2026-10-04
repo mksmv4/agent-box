@@ -28,6 +28,7 @@ agent-box — обвязка проектов под работу с Claude Code
 - `agent-loop.sh` — движок автоцикла на хосте: итерации `/box-next` в контейнере проекта или на хосте
 - `container/Dockerfile` — образ `claude-box`
 - `container/entrypoint.sh` — скрипт запуска контейнера
+- `container/env-run.py` — чтение `.env` проекта по правилам Compose и запуск Claude Code с его переменными
 - `container/settings.json` — базовые настройки образа с регистрацией хука context-guard
 - `compose.yml` — сервис `claude` этого репозитория
 - `.claude/settings.json` — настройки Claude Code этого репозитория: `claudeMdExcludes` для `template/`

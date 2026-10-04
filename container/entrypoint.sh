@@ -1,6 +1,6 @@
 #!/bin/sh
 # Запуск Claude Code в контейнере claude-box; аргументы запуска уходят в claude.
-# Старт от root: из домашней папки хоста переносится то, что там есть, затем Claude Code запускается от node.
+# Старт от root: из домашней папки хоста переносится то, что там есть, затем Claude Code запускается от node с переменными .env проекта.
 set -e
 
 # домашняя папка хоста, только на чтение; /root закрыт для node — агент её не видит
@@ -55,8 +55,5 @@ jq -n --argjson hook "$hook" --arg sl "$statusline" \
   * (if $sl != "" then {statusLine: ($h.statusLine + {command: $sl})} else {} end)' > "$home/.claude/settings.json"
 chown node:node "$home/.claude/settings.json"
 
-# вход Claude Code в контейнере — всегда подписка: ключи и переключатели провайдера из .env проекта убираются, программы агента их тоже не видят
-unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN CLAUDE_CODE_OAUTH_TOKEN \
-  CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_USE_VERTEX CLAUDE_CODE_USE_FOUNDRY
-
-exec $as_node claude "$@"
+# переменные .env проекта получают только Claude Code и команды агента: файл читается уже от node, часть скрипта от root работает без них
+exec $as_node claude-box-env .env claude "$@"
