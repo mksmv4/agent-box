@@ -15,6 +15,9 @@ alert=3600    # секунд итерации до алерта таймера
 
 say() { printf 'agent-loop: %s\n' "$*"; }
 
+# git хоста по репозиторию проекта: команда fsmonitor и хуки из его .git выключены — их может подложить агент контейнера
+g() { git -c core.fsmonitor=false -c core.hooksPath=/dev/null "$@"; }
+
 # запрос к Telegram Bot API: метод и поля запроса; токен уходит в curl через stdin и в списке процессов не виден
 tg_api() {
   local method=$1
@@ -78,11 +81,20 @@ run=docker
 for cmd in git jq "$run"; do
   command -v "$cmd" >/dev/null || stop 2 "нет команды $cmd"
 done
-root=$(git rev-parse --show-toplevel 2>/dev/null) || stop 2 "папка вне git-репозитория: $PWD"
+root=$(g rev-parse --show-toplevel 2>/dev/null) || stop 2 "папка вне git-репозитория: $PWD"
 cd "$root" || exit 2
 file=docs/tasks/$task.md
 [ -f "$file" ] || stop 2 "нет таск-файла $file"
 project=$(basename "$root")
+
+# compose-файл проекта — явным -f, имя — в порядке поиска Compose: контейнер собирается только по нему, дополнения рядом и COMPOSE_FILE из .env в сборку не входят
+cf=
+if [ -z "$host" ]; then
+  for f in compose.yaml compose.yml docker-compose.yaml docker-compose.yml; do
+    [ -f "$f" ] && { cf=$f; break; }
+  done
+  [ -n "$cf" ] || stop 2 "нет compose-файла с сервисом claude в корне проекта — его кладёт /box-init; итерации на хосте — $me --host $task"
+fi
 
 # токен и chat_id — из файла вне репозиториев; берутся только эти две строки, в окружение сессий они не попадают.
 # chat_id, которого нет в файле, берётся из последнего сообщения боту и дописывается в файл
@@ -113,7 +125,7 @@ else
 fi
 
 # lock репозитория: имя задачи и PID цикла; lock процесса, которого уже нет, перехватывается
-lock=$(git rev-parse --absolute-git-dir)/agent-loop.lock
+lock=$(g rev-parse --absolute-git-dir)/agent-loop.lock
 if ! (set -o noclobber; echo "$task $$" >"$lock") 2>/dev/null; then
   other= pid=
   read -r other pid <"$lock"
@@ -164,18 +176,18 @@ $(sed -n '/^## Блокер/,$p' "$file")"
 дальше: $again снова — следующий запуск продолжит"
   elif [ -z "$host" ]; then
     # сервис claude проекта — перед первой итерацией в контейнере
-    services=$(docker compose --profile claude config --services 2>&1)
-    grep -qx claude <<<"$services" || stop 2 "нет сервиса claude в compose-файле проекта — его кладёт /box-init; итерации на хосте — $me --host $task
+    services=$(docker compose -f "$cf" --profile claude config --services 2>&1)
+    grep -qx claude <<<"$services" || stop 2 "нет сервиса claude в $cf — его кладёт /box-init; итерации на хосте — $me --host $task
 $services"
   fi
 
   i=$((i + 1))
-  head=$(git rev-parse HEAD)
+  head=$(g rev-parse HEAD)
   # идентификатор сессии задаётся до запуска: его называет алерт таймера, пока итерация идёт.
   # Сессии контейнера лежат в его домашней папке — доследование тоже через сервис claude
   sid=$(cat /proc/sys/kernel/random/uuid)
   resume="claude --resume $sid"
-  [ -n "$host" ] || resume="docker compose run --rm $resume"
+  [ -n "$host" ] || resume="docker compose -f $cf run --rm $resume"
   say "задача $task — итерация $i/$max_iter, $(date +%H:%M), сессия $sid"
 
   # таймер итерации: порог пройден — алерт, итерация идёт дальше
@@ -197,7 +209,7 @@ $services"
   if [ -n "$host" ]; then
     CONTEXT_GUARD_MODE=protocol claude "${args[@]}"
   else
-    docker compose --progress quiet run --rm -T -e CONTEXT_GUARD_MODE=protocol claude "${args[@]}" </dev/null
+    docker compose -f "$cf" --progress quiet run --rm -T -e CONTEXT_GUARD_MODE=protocol claude "${args[@]}" </dev/null
   fi >"$tmp/out" 2>"$tmp/err"
   code=$?
   kill "$timer" 2>/dev/null
@@ -221,15 +233,15 @@ $error}
 дальше: доследование — $resume; затем $again снова"
   fi
 
-  dirty=$(git status --porcelain)
+  dirty=$(g status --porcelain)
   [ -z "$dirty" ] || stop 1 "итерация $i оставила правки без коммита:
 $dirty
 дальше: доследование — $resume; правки закоммитить или откатить, затем $again снова"
   say "итерация $i закончена: ходов $(jq -r '.num_turns' "$tmp/out"), сессия $sid"
 
   # прогресс: закрыт чекбокс очереди или дифф итерации шире служебных файлов завершения
-  if [ "$(closed <"$file")" -gt "$(git show "$head:$file" 2>/dev/null | closed)" ] ||
-    git diff --name-only "$head" HEAD | grep -qvxF -e "$file" -e docs/JOURNAL.md -e docs/DECISIONS.md; then
+  if [ "$(closed <"$file")" -gt "$(g show "$head:$file" 2>/dev/null | closed)" ] ||
+    g diff --name-only "$head" HEAD | grep -qvxF -e "$file" -e docs/JOURNAL.md -e docs/DECISIONS.md; then
     idle=0
   else
     idle=$((idle + 1))
