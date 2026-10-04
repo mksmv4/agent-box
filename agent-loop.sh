@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Движок автоцикла: итерации /box-next по задаче проекта, пока статус таск-файла «в работе» или «блокер» с ответом пользователя.
-# Запуск на хосте из папки проекта: agent-loop.sh [--host] <задача>
+# Запуск на хосте из папки проекта: agent-loop.sh [--host] <задача>; из любой папки — путём к таск-файлу: agent-loop.sh [--host] <проект>/docs/tasks/<задача>.md
 # Первый раз на машине — ./agent-loop.sh в папке клона: скрипт ставит себя командой agent-loop.sh ссылкой в ~/.local/bin.
 # Итерации идут в контейнере — сервисе claude проекта; --host — итерации claude хоста.
 # Уведомления в Telegram — при TELEGRAM_BOT_TOKEN и TELEGRAM_CHAT_ID в ~/.config/agent-loop.env, иначе остановки видны только в терминале.
@@ -72,10 +72,22 @@ fi
 
 host=
 [ "${1:-}" = --host ] && { host=1; shift; }
-[ $# -eq 0 ] && { say "запуск из папки проекта: $me [--host] <задача>"; exit 0; }
-[ $# -eq 1 ] && [ -n "$1" ] || { echo "запуск: $me [--host] <задача>" >&2; exit 2; }
-task=$1
-again="$me${host:+ --host} $task"
+usage="запуск: $me [--host] <задача> из папки проекта или $me [--host] <путь к таск-файлу> из любой папки"
+[ $# -eq 0 ] && { say "$usage"; exit 0; }
+[ $# -eq 1 ] && [ -n "$1" ] || { echo "$usage" >&2; exit 2; }
+# задача — имя или путь к таск-файлу; путь задаёт и проект — git-репозиторий файла, подсказки повторяют запуск полным путём
+path=
+case $1 in
+  */* | *.md)
+    [ -f "$1" ] || stop 2 "нет таск-файла $1"
+    path=$(realpath "$1")
+    task=$(basename "$path" .md)
+    cd "$(dirname "$path")" || exit 2
+    ;;
+  *) task=$1 ;;
+esac
+target=${path:-$task}
+again="$me${host:+ --host} $target"
 run=docker
 [ -z "$host" ] || run=claude
 for cmd in git jq "$run"; do
@@ -84,6 +96,7 @@ done
 root=$(g rev-parse --show-toplevel 2>/dev/null) || stop 2 "папка вне git-репозитория: $PWD"
 cd "$root" || exit 2
 file=docs/tasks/$task.md
+[ -z "$path" ] || [ "$(realpath "$file" 2>/dev/null)" = "$path" ] || stop 2 "таск-файл $path вне docs/tasks/ проекта $root"
 [ -f "$file" ] || stop 2 "нет таск-файла $file"
 project=$(basename "$root")
 
@@ -93,7 +106,7 @@ if [ -z "$host" ]; then
   for f in compose.yaml compose.yml docker-compose.yaml docker-compose.yml; do
     [ -f "$f" ] && { cf=$f; break; }
   done
-  [ -n "$cf" ] || stop 2 "нет compose-файла с сервисом claude в корне проекта — его кладёт /box-init; итерации на хосте — $me --host $task"
+  [ -n "$cf" ] || stop 2 "нет compose-файла с сервисом claude в корне проекта — его кладёт /box-init; итерации на хосте — $me --host $target"
 fi
 
 # токен и chat_id — из файла вне репозиториев; берутся только эти две строки, в окружение сессий они не попадают.
@@ -177,7 +190,7 @@ $(sed -n '/^## Блокер/,$p' "$file")"
   elif [ -z "$host" ]; then
     # сервис claude проекта — перед первой итерацией в контейнере
     services=$(docker compose -f "$cf" --profile claude config --services 2>&1)
-    grep -qx claude <<<"$services" || stop 2 "нет сервиса claude в $cf — его кладёт /box-init; итерации на хосте — $me --host $task
+    grep -qx claude <<<"$services" || stop 2 "нет сервиса claude в $cf — его кладёт /box-init; итерации на хосте — $me --host $target
 $services"
   fi
 
