@@ -131,6 +131,8 @@ if [ -z "$host" ]; then
 fi
 
 # токен и chat_id — из файла вне репозиториев; берутся только эти две строки, в окружение сессий они не попадают.
+# Токен проверяется запросом getMe до первой итерации, пока пользователь у терминала: неверный токен вида <число>:<ключ>
+# Telegram отклоняет ответом 401 «Unauthorized», токен другого вида — 404 «Not Found»; прочий сбой проверки уведомления не выключает.
 # chat_id, которого нет в файле, берётся из последнего сообщения боту и дописывается в файл
 env=~/.config/agent-loop.env
 if [ -f "$env" ]; then
@@ -142,18 +144,27 @@ if [ -f "$env" ]; then
 fi
 if [ -n "${TELEGRAM_BOT_TOKEN:-}" ]; then
   command -v curl >/dev/null || stop 2 "нет команды curl для уведомлений в Telegram"
-  if [ -z "${TELEGRAM_CHAT_ID:-}" ]; then
-    TELEGRAM_CHAT_ID=$(tg_api getUpdates | jq -r '.result | map(.message.chat.id // empty) | last // empty' 2>/dev/null)
-    if [ -n "$TELEGRAM_CHAT_ID" ]; then
-      printf '\nTELEGRAM_CHAT_ID=%s\n' "$TELEGRAM_CHAT_ID" >>"$env"
-      say "chat_id $TELEGRAM_CHAT_ID взят из последнего сообщения боту и записан в $env"
-    fi
-  fi
-  if [ -n "$TELEGRAM_CHAT_ID" ]; then
-    tg=1
-  else
-    say "уведомления в Telegram выключены: chat_id не найден — напиши боту любое сообщение в Telegram и запусти снова"
-  fi
+  resp=$(tg_api getMe)
+  check=$(jq -r 'if .ok then "ok" else .error_code end' <<<"$resp" 2>/dev/null)
+  why=$(jq -r .description <<<"$resp" 2>/dev/null) || why=$resp
+  case $check in
+    401 | 404)
+      say "уведомления в Telegram выключены: неверный токен, Telegram ответил «$why» — поправь строку TELEGRAM_BOT_TOKEN в $env: токен от @BotFather целиком, вместе с двоеточием" ;;
+    *)
+      [ "$check" = ok ] || say "токен Telegram не проверен, уведомления остаются включены: $why"
+      if [ -z "${TELEGRAM_CHAT_ID:-}" ]; then
+        TELEGRAM_CHAT_ID=$(tg_api getUpdates | jq -r '.result | map(.message.chat.id // empty) | last // empty' 2>/dev/null)
+        if [ -n "$TELEGRAM_CHAT_ID" ]; then
+          printf '\nTELEGRAM_CHAT_ID=%s\n' "$TELEGRAM_CHAT_ID" >>"$env"
+          say "chat_id $TELEGRAM_CHAT_ID взят из последнего сообщения боту и записан в $env"
+        fi
+      fi
+      if [ -n "$TELEGRAM_CHAT_ID" ]; then
+        tg=1
+      else
+        say "уведомления в Telegram выключены: chat_id не найден — напиши боту любое сообщение в Telegram и запусти снова"
+      fi ;;
+  esac
 else
   say "уведомления в Telegram выключены: в $env нет TELEGRAM_BOT_TOKEN"
 fi
