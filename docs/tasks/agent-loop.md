@@ -53,11 +53,11 @@
    `docker compose build claude`
 2. Тестовый проект: зависимости с отдельного сервера пакетов, внешний сервис и несуществующий адрес в примере `.env`, MCP-сервер, база в compose-файле:
    `mkdir ~/box-test && cd ~/box-test && git init -q && printf '{"name":"box-test","dependencies":{"express":"^4.19.0"}}\n' >package.json && printf -- '--extra-index-url https://download.pytorch.org/whl/cpu\ndjango==5.1\ntorch\n' >requirements.txt && printf 'DATABASE_URL=postgres://app:app@db:5432/app\nSTRIPE_API_BASE=https://api.stripe.com\nLEGACY_API=https://legacy.box-test.invalid\n' >.env.example && printf '{"mcpServers":{"sentry":{"type":"http","url":"https://mcp.sentry.dev/mcp"}}}\n' >.mcp.json && printf 'services:\n  db:\n    image: postgres:16\n' >compose.yaml && git add -A && git commit -qm init`
-3. В `~/box-test` — Claude в контейнере, затем в сессии `/box-init`:
-   `docker run --rm -it -v "$PWD":/workspace/box-test -w /workspace/box-test -v "$HOME"/.claude-box:/home/node -v "$HOME":/root/host-home:ro maksim44/claude-box`
-   Вопрос о MCP-сервере из `.mcp.json` при старте — любой ответ. В списке адресов убери один на свой выбор; вопрос об архиве — любой ответ. После итога — выход из сессии.
-4. Ограничение сети принимает строку адресов:
-   `docker compose run --rm -T --entrypoint claude-box-firewall claude --version </dev/null`
+3. Claude в контейнере тестового проекта — именно этой командой `docker run`: сервиса `claude` в `compose.yaml` ещё нет, его вписывает `/box-init`, и `docker compose run --rm claude` до него отвечает «no such service: claude». Команда работает из любой папки:
+   `docker run --rm -it -v "$HOME"/box-test:/workspace/box-test -w /workspace/box-test -v "$HOME"/.claude-box:/home/node -v "$HOME":/root/host-home:ro maksim44/claude-box`
+   В сессии — `/box-init`. Вопрос о MCP-сервере из `.mcp.json` при старте — любой ответ. В списке адресов убери один на свой выбор; вопрос об архиве — любой ответ. После итога — выход из сессии.
+4. Ограничение сети принимает строку адресов — после `/box-init`, сервис `claude` уже в `compose.yaml`:
+   `cd ~/box-test && docker compose run --rm -T --entrypoint claude-box-firewall claude --version </dev/null`
 
 Ожидание в п. 3: список с причиной у каждого адреса — сервер пакетов PyTorch из `requirements.txt`, Stripe из `.env.example`, Sentry из `.mcp.json`, сайты документации Django и Express; `legacy.box-test.invalid` — с пометкой «не найден»; базы `db`, npm и PyPI в списке нет. После ответа в `compose.yaml` у сервиса `claude` строка `CLAUDE_BOX_ALLOW` — список без убранного адреса и без `legacy.box-test.invalid`; итог называет эти адреса. Проверка строки: `grep -n CLAUDE_BOX_ALLOW ~/box-test/compose.yaml`. Ожидание в п. 4: строка «claude-box-firewall: сеть ограничена: …, своих адресов проекта N …» с N больше нуля, затем версия Claude Code. Пошло иначе — напиши, на каком пункте и что видно.
 
