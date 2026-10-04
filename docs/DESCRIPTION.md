@@ -10,7 +10,7 @@ agent-box — обвязка проектов под работу с AI-аген
 ## Стек
 
 - Claude Code — агент: интерактивная сессия и headless-запуск `claude -p` на итерацию автоцикла. Поведение обвязки задают скиллы Claude Code — `/box-init`, `/box-task`, `/box-next` — и хук context-guard. Работа рассчитана на подписку Claude; в контейнере вход только по ней.
-- Docker и Docker Compose — контейнер `claude-box` с Claude Code: образ на `node:20` с `jq` и `python3-venv`, сам Claude Code ставится официальным установщиком при первом старте. Запуск — сервис `claude` в compose-файле проекта. Образ собирается под amd64; публикация на Docker Hub публичным образом `maksim44/claude-box` — задача релиза.
+- Docker и Docker Compose — контейнер `claude-box` с Claude Code: образ на `node:20` с `jq`, `python3-venv` и `iptables`, сам Claude Code ставится официальным установщиком при первом старте. Запуск — сервис `claude` в compose-файле проекта. Образ собирается под amd64; публикация на Docker Hub публичным образом `maksim44/claude-box` — задача релиза.
 - Shell — скрипт запуска контейнера; движок автоцикла — bash-скрипт на хосте с разбором итога итерации через `jq` и уведомлениями через Telegram Bot API.
 - Markdown и git — документы и состояние проекта. Документы и заготовки — на русском.
 

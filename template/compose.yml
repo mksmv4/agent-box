@@ -6,6 +6,8 @@ services:
     profiles: [claude]
     stdin_open: true
     tty: true
+    # права ограничения сети для итераций движка: правила ставит часть запуска от root, процессам node права недоступны
+    cap_add: [NET_ADMIN, NET_RAW]
     # .env проекта читает скрипт запуска и отдаёт переменные Claude Code; строка env_file отдаёт их и части запуска от root: PATH или LD_PRELOAD из .env выполнят программу агента с правами root
     # папка проекта — под своим именем: сессии, автопамять и доверие Claude Code в общей домашней папке привязаны к пути
     working_dir: /workspace/${COMPOSE_PROJECT_NAME}

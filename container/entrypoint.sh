@@ -6,7 +6,8 @@ set -e
 # домашняя папка хоста, только на чтение; /root закрыт для node — агент её не видит
 host=/root/host-home
 home=/home/node
-as_node="setpriv --reuid=node --regid=node --init-groups env HOME=$home USER=node"
+# процессы node — без прав root: ограничивающий набор пуст, повышение прав запрещено — правила сети, поставленные claude-box-firewall, им не снять и через setuid-программы
+as_node="setpriv --reuid=node --regid=node --init-groups --bounding-set -all --no-new-privs env HOME=$home USER=node"
 
 # домашняя папка контейнера — ~/.claude-box хоста; при первом запуске Compose создаёт её от root
 chown node:node "$home"

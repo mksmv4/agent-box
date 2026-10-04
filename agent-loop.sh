@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Движок автоцикла: итерации /box-next по задаче проекта, пока статус таск-файла «в работе» или «блокер» с ответом пользователя.
-# Запуск на хосте из папки проекта: agent-loop.sh [--host] <задача>; из любой папки — путём к таск-файлу: agent-loop.sh [--host] <проект>/docs/tasks/<задача>.md
+# Запуск на хосте из папки проекта: agent-loop.sh [--host | --no-firewall] <задача>; из любой папки — путём к таск-файлу: agent-loop.sh [--host | --no-firewall] <проект>/docs/tasks/<задача>.md
 # Первый раз на машине — ./agent-loop.sh в папке клона: скрипт ставит себя командой agent-loop.sh ссылкой в ~/.local/bin.
-# Итерации идут в контейнере — сервисе claude проекта; --host — итерации claude хоста.
+# Итерации идут в контейнере — сервисе claude проекта: сеть ограничена списком адресов, режим без вопросов о разрешениях;
+# --no-firewall — сеть контейнера открыта, режим auto; --host — итерации claude хоста в режиме auto.
 # Уведомления в Telegram — при TELEGRAM_BOT_TOKEN и TELEGRAM_CHAT_ID в ~/.config/agent-loop.env, иначе остановки видны только в терминале.
 # Код выхода: 0 — «готово» или лимит итераций; 1 — остановка, ждущая пользователя; 2 — движок не запустился; 130 — Ctrl+C.
 set -u
@@ -70,9 +71,16 @@ if ! command -v agent-loop.sh >/dev/null; then
   esac
 fi
 
-host=
-[ "${1:-}" = --host ] && { host=1; shift; }
-usage="запуск: $me [--host] <задача> из папки проекта или $me [--host] <путь к таск-файлу> из любой папки"
+host= open=
+while :; do
+  case ${1:-} in
+    --host) host=1 ;;
+    --no-firewall) open=1 ;;
+    *) break ;;
+  esac
+  shift
+done
+usage="запуск: $me [--host | --no-firewall] <задача> из папки проекта или $me [--host | --no-firewall] <путь к таск-файлу> из любой папки"
 [ $# -eq 0 ] && { say "$usage"; exit 0; }
 [ $# -eq 1 ] && [ -n "$1" ] || { echo "$usage" >&2; exit 2; }
 # задача — имя или путь к таск-файлу; путь задаёт и проект — git-репозиторий файла, подсказки повторяют запуск полным путём
@@ -87,7 +95,7 @@ case $1 in
   *) task=$1 ;;
 esac
 target=${path:-$task}
-again="$me${host:+ --host} $target"
+again="$me${host:+ --host}${open:+ --no-firewall} $target"
 run=docker
 [ -z "$host" ] || run=claude
 for cmd in git jq "$run"; do
@@ -107,6 +115,19 @@ if [ -z "$host" ]; then
     [ -f "$f" ] && { cf=$f; break; }
   done
   [ -n "$cf" ] || stop 2 "нет compose-файла с сервисом claude в корне проекта — его кладёт /box-init; итерации на хосте — $me --host $target"
+fi
+
+# режим итераций: в контейнере без --no-firewall — точка входа claude-box-firewall ограничивает сеть, и вопросов о разрешениях нет
+mode=auto
+fw=()
+if [ -z "$host" ]; then
+  if [ -z "$open" ]; then
+    mode=bypassPermissions
+    fw=(--entrypoint claude-box-firewall)
+    say "итерации в контейнере: сеть ограничена списком адресов, режим без вопросов о разрешениях"
+  else
+    say "итерации в контейнере: сеть открыта, режим auto"
+  fi
 fi
 
 # токен и chat_id — из файла вне репозиториев; берутся только эти две строки, в окружение сессий они не попадают.
@@ -214,7 +235,7 @@ $services"
     notify "$msg"
   ) &
   timer=$!
-  args=(-p "/box-next $task" --session-id "$sid" --permission-mode auto --permission-prompts none
+  args=(-p "/box-next $task" --session-id "$sid" --permission-mode "$mode" --permission-prompts none
     --output-format json --max-turns "$max_turns")
   # контейнер: -T — stdout с JSON итога отдельно от stderr; ввод — /dev/null: -p добавляет поданный ввод к промпту,
   # а открытый ввод контейнера не кончается; --progress quiet — в stderr только ошибки.
@@ -222,7 +243,7 @@ $services"
   if [ -n "$host" ]; then
     CONTEXT_GUARD_MODE=protocol claude "${args[@]}"
   else
-    docker compose -f "$cf" --progress quiet run --rm -T -e CONTEXT_GUARD_MODE=protocol claude "${args[@]}" </dev/null
+    docker compose -f "$cf" --progress quiet run --rm -T "${fw[@]}" -e CONTEXT_GUARD_MODE=protocol claude "${args[@]}" </dev/null
   fi >"$tmp/out" 2>"$tmp/err"
   code=$?
   kill "$timer" 2>/dev/null
