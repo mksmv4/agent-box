@@ -248,13 +248,15 @@ $services"
   timer=$!
   args=(-p "/box-next $task" --session-id "$sid" --permission-mode "$mode" --permission-prompts none
     --output-format json --max-turns "$max_turns")
+  # окружение итерации: сигнал context-guard — протокол молча; кэш промпта на пять минут вместо часового по умолчанию подписки — отсчёт идёт
+  # от последнего вызова, вызовы внутри итерации идут чаще, а следующая итерация стартует новой сессией; запись в кэш на час стоит 2× входа, на пять минут — 1,25×.
   # контейнер: -T — stdout с JSON итога отдельно от stderr; ввод — /dev/null: -p добавляет поданный ввод к промпту,
   # а открытый ввод контейнера не кончается; --progress quiet — в stderr только ошибки.
   # Код выхода claude compose возвращает; на Ctrl+C отдаёт SIGINT сессии и сам выходит с 130, не дожидаясь итога
   if [ -n "$host" ]; then
-    CONTEXT_GUARD_MODE=protocol claude "${args[@]}"
+    CONTEXT_GUARD_MODE=protocol CLAUDE_CODE_PROMPT_CACHE_TTL=5m claude "${args[@]}"
   else
-    docker compose -f "$cf" --progress quiet run --rm -T "${fw[@]}" -e CONTEXT_GUARD_MODE=protocol claude "${args[@]}" </dev/null
+    docker compose -f "$cf" --progress quiet run --rm -T "${fw[@]}" -e CONTEXT_GUARD_MODE=protocol -e CLAUDE_CODE_PROMPT_CACHE_TTL=5m claude "${args[@]}" </dev/null
   fi >"$tmp/out" 2>"$tmp/err"
   code=$?
   kill "$timer" 2>/dev/null
