@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Движок автоцикла: итерации /box-next по задаче проекта, пока статус таск-файла «в работе» или «блокер» с ответом пользователя.
-# Запуск на хосте из папки проекта: agent-loop.sh [--host | --no-firewall] <задача>; из любой папки — путём к таск-файлу: agent-loop.sh [--host | --no-firewall] <проект>/docs/tasks/<задача>.md
+# Запуск на хосте из папки проекта: agent-loop.sh [--host | --no-firewall] [--quiet] <задача>; из любой папки — путём к таск-файлу: agent-loop.sh [--host | --no-firewall] [--quiet] <проект>/docs/tasks/<задача>.md
 # Первый раз на машине — ./agent-loop.sh в папке клона: скрипт ставит себя командой agent-loop.sh ссылкой в ~/.local/bin.
 # Итерации идут в контейнере — сервисе claude проекта: сеть ограничена списком адресов, режим без вопросов о разрешениях;
 # --no-firewall — сеть контейнера открыта, режим auto; --host — итерации claude хоста в режиме auto.
-# Уведомления в Telegram — при TELEGRAM_BOT_TOKEN и TELEGRAM_CHAT_ID в ~/.config/agent-loop.env, иначе остановки видны только в терминале.
+# Уведомления в Telegram — при TELEGRAM_BOT_TOKEN и TELEGRAM_CHAT_ID в ~/.config/agent-loop.env, иначе остановки видны только в терминале;
+# --quiet — остановки только в терминале и при настроенном боте.
 # Код выхода: 0 — «готово» или лимит итераций; 1 — остановка, ждущая пользователя; 2 — движок не запустился; 130 — Ctrl+C.
 set -u
 
@@ -71,16 +72,17 @@ if ! command -v agent-loop.sh >/dev/null; then
   esac
 fi
 
-host= open=
+host= open= quiet=
 while :; do
   case ${1:-} in
     --host) host=1 ;;
     --no-firewall) open=1 ;;
+    --quiet) quiet=1 ;;
     *) break ;;
   esac
   shift
 done
-usage="запуск: $me [--host | --no-firewall] <задача> из папки проекта или $me [--host | --no-firewall] <путь к таск-файлу> из любой папки"
+usage="запуск: $me [--host | --no-firewall] [--quiet] <задача> из папки проекта или $me [--host | --no-firewall] [--quiet] <путь к таск-файлу> из любой папки"
 [ $# -eq 0 ] && { say "$usage"; exit 0; }
 [ $# -eq 1 ] && [ -n "$1" ] || { echo "$usage" >&2; exit 2; }
 # задача — имя или путь к таск-файлу; путь задаёт и проект — git-репозиторий файла, подсказки повторяют запуск полным путём
@@ -95,7 +97,7 @@ case $1 in
   *) task=$1 ;;
 esac
 target=${path:-$task}
-again="$me${host:+ --host}${open:+ --no-firewall} $target"
+again="$me${host:+ --host}${open:+ --no-firewall}${quiet:+ --quiet} $target"
 run=docker
 [ -z "$host" ] || run=claude
 for cmd in git jq "$run"; do
@@ -133,7 +135,8 @@ fi
 # токен и chat_id — из файла вне репозиториев; берутся только эти две строки, в окружение сессий они не попадают.
 # Токен проверяется запросом getMe до первой итерации, пока пользователь у терминала: неверный токен вида <число>:<ключ>
 # Telegram отклоняет ответом 401 «Unauthorized», токен другого вида — 404 «Not Found»; прочий сбой проверки уведомления не выключает.
-# chat_id, которого нет в файле, берётся из последнего сообщения боту и дописывается в файл
+# chat_id, которого нет в файле, берётся из последнего сообщения боту и дописывается в файл.
+# --quiet выключает Telegram на запуск целиком, вместе с проверкой токена
 env=~/.config/agent-loop.env
 if [ -f "$env" ]; then
   while IFS='=' read -r key value || [ -n "$key" ]; do
@@ -142,7 +145,9 @@ if [ -f "$env" ]; then
     case $key in TELEGRAM_BOT_TOKEN | TELEGRAM_CHAT_ID) printf -v "$key" %s "$value" ;; esac
   done <"$env"
 fi
-if [ -n "${TELEGRAM_BOT_TOKEN:-}" ]; then
+if [ -n "$quiet" ]; then
+  say "уведомления в Telegram выключены флагом --quiet: остановки — только в терминале"
+elif [ -n "${TELEGRAM_BOT_TOKEN:-}" ]; then
   command -v curl >/dev/null || stop 2 "нет команды curl для уведомлений в Telegram"
   resp=$(tg_api getMe)
   check=$(jq -r 'if .ok then "ok" else .error_code end' <<<"$resp" 2>/dev/null)
