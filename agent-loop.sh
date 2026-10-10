@@ -6,6 +6,7 @@
 # --no-firewall — сеть контейнера открыта, режим auto; --host — итерации claude хоста в режиме auto.
 # Уведомления в Telegram — при TELEGRAM_BOT_TOKEN и TELEGRAM_CHAT_ID в ~/.config/agent-loop.env, иначе остановки видны только в терминале;
 # --quiet — остановки только в терминале и при настроенном боте.
+# Журнал цикла — .git/agent-loop.log проекта, путь — в строке старта: запуски, итерации с ходом сессии, остановки.
 # Код выхода: 0 — «готово» или лимит итераций; 1 — остановка, ждущая пользователя; 2 — движок не запустился; 130 — Ctrl+C.
 set -u
 
@@ -48,11 +49,17 @@ notify() {
     say "уведомление в Telegram не ушло: $(jq -r .description <<<"$resp" 2>/dev/null || printf %s "$resp")"
 }
 
-# остановка цикла: сообщение в терминал, уведомление и код выхода; отказ запуска (код 2) — только в терминал
+# строка журнала цикла: дата и время, строки продолжения — с отступом.
+# До захвата lock журнал — /dev/null: отказ второго запуска в журнал идущего цикла не попадает
+log=/dev/null
+logl() { printf '%s %s\n' "$(date '+%F %T')" "$*" | sed '2,$s/^/    /' >>"$log"; }
+
+# остановка цикла: сообщение в терминал и журнал, уведомление и код выхода; отказ запуска (код 2) — без уведомления
 stop() {
   local code=$1
   shift
   say "$@"
+  logl "остановка: $*"
   [ "$code" = 2 ] || notify "$*"
   exit "$code"
 }
@@ -183,7 +190,13 @@ if ! (set -o noclobber; echo "$task $$" >"$lock") 2>/dev/null; then
   echo "$task $$" >"$lock"
 fi
 tmp=$(mktemp -d)
-trap 'rm -f "$lock"; rm -rf "$tmp"' EXIT
+mark=
+trap 'rm -f "$lock"; rm -rf "$tmp"; [ -z "$mark" ] || kill "$mark" 2>/dev/null' EXIT
+
+# журнал цикла — рядом с lock-файлом, вне рабочего дерева; файл копится от запуска к запуску
+log=$(dirname "$lock")/agent-loop.log
+say "журнал цикла: $log"
+logl "запуск: $again"
 
 # Ctrl+C: терминал шлёт SIGINT движку и идущей сессии claude; движок замечает его, когда команда вернётся
 interrupted=0
@@ -195,6 +208,36 @@ closed() { sed -n '/^## Постановка/,/^## /p' | grep -c '^- \[x\]'; }
 # ответ пользователя на блокер: строка «ответ:» в секции «Блокер» в любом регистре.
 # Регистр кириллицы grep сводит в UTF-8 локали, в локали C совпадает только «ответ:»
 answered() { sed -n '/^## Блокер/,$p' "$file" | grep -qi '^ответ:'; }
+
+# ход итерации в журнал: из ответов агента в истории сессии Claude Code (jsonl) — текст, чтение и правка файлов,
+# команды, поиск, прочие инструменты по имени; пути — от корня проекта сессии, длинное обрезается
+progress='fromjson? | select(.type == "assistant" and (.isSidechain | not))
+  | (.timestamp | sub("\\.[0-9]+Z$"; "Z") | fromdate | strflocaltime("%F %T")) as $t | (.cwd + "/") as $root
+  | def rel: ltrimstr($root); def short: gsub("\\s+"; " ") | if length > 200 then .[0:200] + "…" else . end;
+  .message.content[]? | .input as $in
+  | if .type == "text" then "агент: " + (.text | short)
+    elif .type != "tool_use" then empty
+    elif .name == "Read" then "читает " + ($in.file_path | rel)
+    elif .name == "Edit" or .name == "Write" or .name == "NotebookEdit" then "правит " + ($in.file_path // $in.notebook_path | rel)
+    elif .name == "Bash" then "команда: " + ($in.command | short)
+    elif .name == "Grep" or .name == "Glob" then "ищет " + $in.pattern + ($in.path // "" | rel | if . == "" then "" else " в " + . end)
+    else .name + " " + ($in | tostring | short) end
+  | "\($t)   \(.)"'
+
+# история сессии — у контейнера в его домашней папке ~/.claude-box, у хоста в ~/.claude; файл появляется со стартом сессии.
+# Метка — процесс на время итерации: со смертью метки tail дочитывает файл и выходит
+follow() {
+  local dir=~/.claude/projects f= last=
+  [ -n "$host" ] || dir=~/.claude-box/.claude/projects
+  while :; do
+    kill -0 "$mark" 2>/dev/null || last=1
+    f=$(find "$dir" -maxdepth 2 -name "$sid.jsonl" -print -quit 2>/dev/null)
+    [ -z "$f" ] || break
+    [ -z "$last" ] || return 0
+    sleep 1
+  done
+  tail -n +1 -f --pid="$mark" "$f" | jq --unbuffered -Rr "$progress" >>"$log" 2>/dev/null
+}
 
 i=0
 idle=0
@@ -239,6 +282,19 @@ $services"
   resume="claude --resume $sid"
   [ -n "$host" ] || resume="docker compose -f $cf run --rm $resume"
   say "задача $task — итерация $i/$max_iter, $(date +%H:%M), сессия $sid"
+  # начало итерации в журнал: шаг очереди — первый незакрытый чекбокс «Постановки», номер из их числа, начало текста
+  queue=$(sed -n '/^## Постановка/,/^## /p' "$file" | grep '^- \[[ x]\]')
+  step=$(grep -m1 '^- \[ \]' <<<"$queue")
+  step=${step#- \[ \] }
+  [ "${#step}" -le 80 ] || step="${step:0:80}…"
+  logl "задача $task — итерация $i/$max_iter, шаг $(($(closed <"$file") + 1))/$(grep -c . <<<"$queue") «$step», сессия $sid"
+  t0=$SECONDS
+
+  # ход итерации — фоном, пока жива метка
+  sleep infinity &
+  mark=$!
+  follow &
+  follower=$!
 
   # таймер итерации: порог пройден — алерт, итерация идёт дальше
   (
@@ -248,6 +304,7 @@ $services"
     msg="задача $task — итерация $i идёт дольше $((alert / 60)) мин, сессия $sid; итерация продолжается
 дальше: ждать; вмешательство — $resume или Ctrl+C в терминале движка"
     say "$msg"
+    logl "$msg"
     notify "$msg"
   ) &
   timer=$!
@@ -265,11 +322,24 @@ $services"
   fi >"$tmp/out" 2>"$tmp/err"
   code=$?
   kill "$timer" 2>/dev/null
+  # снятие метки: tail дочитывает ход и выходит. wait убирает процесс метки из таблицы процессов — неубранный tail считает живым
+  kill "$mark" 2>/dev/null
+  wait "$mark" 2>/dev/null
+  mark=
+  wait "$follower"
 
   # итог итерации: JSON на stdout; ненулевой код, is_error или stdout без JSON — провал.
   # -s ловит и пустой stdout: jq 1.6 с одним -e пропускает его с кодом 0
   json=0
   jq -se 'length == 1 and (.[0] | type == "object")' "$tmp/out" >/dev/null 2>&1 && json=1
+
+  # конец итерации в журнал: длительность, исход — terminal_reason и ходы итога, статус задачи, коммиты итерации
+  dur=$((SECONDS - t0))
+  outcome="итога JSON нет"
+  [ "$json" = 0 ] || outcome=$(jq -r '"\(.terminal_reason), ходов \(.num_turns)"' "$tmp/out")
+  commits=$(g log --reverse --format='коммит %h %s' "$head"..HEAD)
+  logl "итерация $i закончена за $((dur / 60)) мин $((dur % 60)) с: код $code, $outcome, статус «$(sed -n '1s/^статус: *//p' "$file")»${commits:+
+$commits}"
   [ "$interrupted" = 0 ] || stop 130 "остановлен Ctrl+C во время итерации $i: в дереве могут быть правки без коммита
 дальше: git status, доследование — $resume; затем $again снова"
   if [ "$json" = 0 ]; then
