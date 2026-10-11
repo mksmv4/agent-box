@@ -29,8 +29,9 @@
 │   └── researches/      # логи разведки по датам: как пришли к решениям
 ├── my_local/            # локальные артефакты вне git
 └── .claude/
-    ├── skills/box-next/     # скилл /box-next <задача>: один шаг задачи и завершение по протоколу
-    └── context-guard.conf   # CONTEXT_GUARD_MODE=rules: сигнал context-guard предлагает варианты по правилам проекта
+    ├── skills/box-next/         # скилл /box-next <задача>: один шаг задачи и завершение по протоколу
+    ├── skills/box-orchestrate/  # скилл /box-orchestrate <задача>: сессия на хосте ведёт задачу движком; правила страниц и примеры
+    └── context-guard.conf       # CONTEXT_GUARD_MODE=rules: сигнал context-guard предлагает варианты по правилам проекта
 ```
 
 ## Слои чтения
