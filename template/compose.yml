@@ -17,10 +17,11 @@ services:
     working_dir: /workspace/${COMPOSE_PROJECT_NAME}
     volumes:
       - .:/workspace/${COMPOSE_PROJECT_NAME}
-      # только на чтение поверх папки проекта: compose-файл задаёт контейнер следующего запуска, настройки и хуки git выполняет git хоста
+      # только на чтение поверх папки проекта: compose-файл задаёт контейнер следующего запуска, настройки и хуки git выполняет git хоста, строка списка исключений .git/info/exclude прячет файл от git без следа в файлах проекта — её дописывает человек на хосте
       - ./compose.yml:/workspace/${COMPOSE_PROJECT_NAME}/compose.yml:ro
       - ./.git/config:/workspace/${COMPOSE_PROJECT_NAME}/.git/config:ro
       - ./.git/hooks:/workspace/${COMPOSE_PROJECT_NAME}/.git/hooks:ro
+      - ./.git/info:/workspace/${COMPOSE_PROJECT_NAME}/.git/info:ro
       # домашняя папка контейнера, общая для всех проектов машины: логин, история сессий, сам Claude Code
       - ~/.claude-box:/home/node
       # домашняя папка хоста, только на чтение: скрипт запуска берёт оттуда CLAUDE.md, хуки, строку состояния, настройки и .gitconfig — что найдёт; агенту она закрыта
