@@ -8,6 +8,8 @@
 # --quiet — остановки только в терминале и при настроенном боте.
 # Журнал цикла — .git/agent-loop.log проекта, путь — в строке старта: запуски, итерации с ходом сессии, остановки.
 # Код выхода: 0 — «готово» или лимит итераций; 1 — остановка, ждущая пользователя; 2 — движок не запустился; 130 — Ctrl+C.
+# Правило песочницы claude-box для сессии Claude хоста, которая ведёт движок, — agent-loop.sh --sandbox-rule человеком в терминале, раз на машину:
+# исключение классификатора режима auto в ~/.claude/settings.json; повторный запуск заменяет его. Код выхода: 0 — Claude Code видит правило; 1 — не видит; 2 — не записано.
 set -u
 
 max_iter=10   # итераций за запуск
@@ -64,6 +66,40 @@ stop() {
   exit "$code"
 }
 
+# правило песочницы claude-box в исключения классификатора режима auto личных настроек Claude Code хоста: блок autoMode
+# классификатор читает оттуда, настройки проекта ему закрыты. Запись своих разрешений сессия хоста в режиме auto получает с отказом — пишет человек
+sandbox_rule() {
+  local f=~/.claude/settings.json label='Claude-box Sandbox:' rule bak new seen cmd
+  rule="$label запуск Claude Code в песочнице claude-box разрешён и не считается Create Unsafe Agents — docker compose -f <compose-файл в корне проекта> run ... --entrypoint claude-box-firewall ... claude <аргументы>, в том числе с -p, --resume, --session-id и --permission-mode bypassPermissions. Контейнер сервиса claude — песочница: исходящая сеть ограничена списком адресов, процесс под обычным пользователем, с хоста подключены папка проекта, отдельная домашняя папка контейнера ~/.claude-box и домашняя папка хоста — только на чтение и закрыта процессу агента. Правило не покрывает запуск без точки входа claude-box-firewall и команды с -v/--volume, --user, --privileged, --cap-add или compose-файлом вне корня проекта."
+  for cmd in jq claude; do
+    command -v "$cmd" >/dev/null || stop 2 "нет команды $cmd"
+  done
+  # копия настроек с датой рядом: первая копия дня остаётся при повторных запусках; файла нет — он создаётся
+  bak=$f.bak-$(date +%F)
+  if [ -e "$f" ]; then
+    [ -e "$bak" ] || cp "$f" "$bak" || stop 2 "копия $bak не записана, настройки не тронуты"
+  else
+    mkdir -p ~/.claude && printf '{}\n' >"$f" || stop 2 "файл $f не создан"
+    say "файла $f не было — он создан"
+    bak=
+  fi
+  # запись с меткой заменяется текущей; встроенные исключения — строкой "$defaults" в начале, пока своего списка нет:
+  # список без неё заменяет встроенные целиком. Запись — поверх файла: ссылка на файл и его права остаются
+  new=$(mktemp)
+  jq --arg l "$label" --arg r "$rule" \
+    '.autoMode.allow = [((.autoMode.allow // ["$defaults"])[] | select(startswith($l) | not)), $r]' \
+    "$f" >"$new" || { rm -f "$new"; stop 2 "настройки $f не прочитаны как JSON — правило не записано, файл не тронут"; }
+  cp "$new" "$f" || { rm -f "$new"; stop 2 "запись в $f не удалась"; }
+  rm -f "$new"
+  say "правило записано в $f${bak:+; копия настроек до первой правки за день — $bak}"
+  # правило глазами Claude Code
+  seen=$(claude auto-mode config | jq -r --arg l "$label" '.allow[]? | select(startswith($l))')
+  [ -n "$seen" ] || stop 1 "правило не применилось: в claude auto-mode config его нет"
+  say "Claude Code видит правило (claude auto-mode config):"
+  printf '%s\n' "$seen"
+  exit 0
+}
+
 # команда agent-loop.sh по имени: ссылка на этот скрипт в ~/.local/bin; папки нет в PATH — запуск полным адресом.
 # Ссылка от перенесённого клона заменяется. me — команда запуска в подсказках движка
 me=agent-loop.sh
@@ -89,8 +125,12 @@ while :; do
   esac
   shift
 done
-usage="запуск: $me [--host | --no-firewall] [--quiet] <задача> из папки проекта или $me [--host | --no-firewall] [--quiet] <путь к таск-файлу> из любой папки"
+usage="запуск: $me [--host | --no-firewall] [--quiet] <задача> из папки проекта или $me [--host | --no-firewall] [--quiet] <путь к таск-файлу> из любой папки; правило песочницы claude-box для сессии Claude хоста — $me --sandbox-rule"
 [ $# -eq 0 ] && { say "$usage"; exit 0; }
+if [ "$1" = --sandbox-rule ]; then
+  [ $# -eq 1 ] && [ -z "$host$open$quiet" ] || { echo "$usage" >&2; exit 2; }
+  sandbox_rule
+fi
 [ $# -eq 1 ] && [ -n "$1" ] || { echo "$usage" >&2; exit 2; }
 # задача — имя или путь к таск-файлу; путь задаёт и проект — git-репозиторий файла, подсказки повторяют запуск полным путём
 path=
