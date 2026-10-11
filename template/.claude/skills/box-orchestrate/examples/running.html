@@ -1,0 +1,215 @@
+<title>export-csv · Учёт расходов</title>
+<style>
+/* страница задачи: одна колонка до 46rem, шапка с состоянием, разделы сверху вниз */
+:root {
+  --bg: #f5f6f8;
+  --surface: #ffffff;
+  --fg: #1b1f27;
+  --muted: #586070;
+  --line: #d4d9e1;
+  --done: #1f6e3d;
+  --done-bg: #e0f0e6;
+  --run: #1f50b5;
+  --run-bg: #e2eafa;
+  --wait: #8a5100;
+  --wait-bg: #fcefd5;
+  --fail: #ad2a1f;
+  --fail-bg: #fae3e0;
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #12151a;
+    --surface: #1a1e25;
+    --fg: #e5e8ee;
+    --muted: #9ba3b1;
+    --line: #333a46;
+    --done: #74d39c;
+    --done-bg: #16301f;
+    --run: #93b4ff;
+    --run-bg: #1a2846;
+    --wait: #f0b54a;
+    --wait-bg: #382a10;
+    --fail: #ff8f85;
+    --fail-bg: #3b1b18;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #12151a;
+  --surface: #1a1e25;
+  --fg: #e5e8ee;
+  --muted: #9ba3b1;
+  --line: #333a46;
+  --done: #74d39c;
+  --done-bg: #16301f;
+  --run: #93b4ff;
+  --run-bg: #1a2846;
+  --wait: #f0b54a;
+  --wait-bg: #382a10;
+  --fail: #ff8f85;
+  --fail-bg: #3b1b18;
+  color-scheme: dark;
+}
+body { background: var(--bg); color: var(--fg); font: 15px/1.5 var(--font); padding-inline: 16px; padding-block: 20px 48px; }
+main { max-width: 46rem; margin-inline: auto; display: grid; gap: 32px; }
+section, header { display: grid; gap: 10px; min-width: 0; }
+h1 { font-size: 1.5rem; line-height: 1.2; margin: 0; text-wrap: balance; }
+h2 { font-size: 1.125rem; line-height: 1.3; margin: 0; }
+h3 { font-size: .9375rem; margin: 6px 0 0; }
+p, ul, ol { margin: 0; }
+ul, ol { padding-left: 1.25rem; display: grid; gap: 4px; }
+.meta { color: var(--muted); font-size: .875rem; display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; }
+.lead { font-size: 1.0625rem; }
+.st { display: inline-block; padding: 1px 10px; border: 1px solid; border-radius: 999px; font-size: .8125rem; font-weight: 600; white-space: nowrap; }
+.st-done { color: var(--done); background: var(--done-bg); border-color: var(--done); }
+.st-run { color: var(--run); background: var(--run-bg); border-color: var(--run); }
+.st-wait { color: var(--wait); background: var(--wait-bg); border-color: var(--wait); }
+.st-fail { color: var(--fail); background: var(--fail-bg); border-color: var(--fail); }
+.st-todo { color: var(--muted); background: var(--surface); border-color: var(--muted); border-style: dashed; }
+.st-part { color: var(--muted); background: var(--surface); border-color: var(--muted); }
+.kind { font-weight: 600; }
+.note { color: var(--muted); font-size: .875rem; }
+figure { margin: 0; display: grid; gap: 8px; }
+figure svg { display: block; width: 100%; max-width: 30rem; height: auto; color: var(--fg); }
+figcaption { color: var(--muted); font-size: .875rem; }
+.scroll { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: .875rem; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; vertical-align: top; padding: 7px 12px 7px 0; border-bottom: 1px solid var(--line); }
+tr.it td { border-bottom: 0; padding-bottom: 2px; }
+tr.cm td { padding-top: 0; color: var(--muted); }
+th { color: var(--muted); font-weight: 600; white-space: nowrap; }
+td.nw { white-space: nowrap; }
+.commit { display: block; overflow-wrap: anywhere; font-family: var(--mono); font-size: .8125rem; }
+details { border-top: 1px solid var(--line); padding-top: 10px; display: grid; gap: 8px; }
+summary { cursor: pointer; font-weight: 600; }
+summary:focus-visible { outline: 2px solid var(--run); outline-offset: 3px; border-radius: 4px; }
+details[open] > summary { margin-bottom: 8px; }
+.qa { display: grid; gap: 4px; padding-block: 10px; border-bottom: 1px solid var(--line); }
+.qa:first-of-type { padding-top: 0; }
+/* блок «Ждёт решения»: янтарная рамка состояния, карточки вариантов на поверхности страницы */
+.ask { background: var(--wait-bg); border: 1px solid var(--wait); border-radius: 10px; padding: 16px; display: grid; gap: 10px; min-width: 0; }
+.ask h2 { color: var(--wait); }
+.opts { display: grid; gap: 10px; }
+.opt { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 12px; display: grid; gap: 6px; min-width: 0; }
+.opt h3 { margin: 0; }
+.ask figure { background: var(--surface); border-radius: 8px; padding: 8px; }
+/* блоки схем: заливка и обводка по состоянию, текст и стрелки цветом текста страницы */
+svg text { fill: currentColor; font-family: var(--font); font-size: 13px; }
+svg .s { font-size: 12px; font-weight: 600; }
+svg .hd { font-size: 12.5px; font-weight: 700; }
+svg .act { fill: var(--muted); font-size: 12px; }
+svg .ar { stroke: currentColor; stroke-width: 1.5; }
+svg .ah { fill: currentColor; }
+.b rect { stroke-width: 1.5; }
+.b-done rect { fill: var(--done-bg); stroke: var(--done); }
+.b-done .s { fill: var(--done); }
+.b-run rect { fill: var(--run-bg); stroke: var(--run); }
+.b-run .s { fill: var(--run); }
+.b-wait rect { fill: var(--wait-bg); stroke: var(--wait); }
+.b-wait .s { fill: var(--wait); }
+.b-fail rect { fill: var(--fail-bg); stroke: var(--fail); }
+.b-fail .s { fill: var(--fail); }
+.b-todo rect { fill: var(--surface); stroke: var(--muted); stroke-dasharray: 5 4; }
+.b-todo .s { fill: var(--muted); }
+.b-opt rect { fill: var(--surface); stroke: var(--muted); }
+</style>
+
+<main>
+  <header>
+    <p class="meta"><span>Пример: задача и проект вымышленные</span></p>
+    <h1>export-csv</h1>
+    <p class="meta">
+      <span>Проект «Учёт расходов»</span>
+      <span>Обновлено 2026-10-11 14:32</span>
+      <span class="st st-run">идёт</span>
+    </p>
+    <p class="lead">Движок ведёт итерацию 4: сессия делает шаг «Выгрузка за период». От пользователя сейчас ничего не нужно.</p>
+  </header>
+
+  <section>
+    <h2>Цель и шаги</h2>
+    <p>Клиент выгружает свои расходы в файл, который открывается в Excel и Google Таблицах. Выгрузка — за любой период, с телефона и компьютера.</p>
+    <figure>
+      <svg viewBox="0 0 340 308" role="img" aria-label="Очередь из пяти шагов: два сделано, третий идёт, два впереди.">
+        <g class="b b-done"><rect x="1" y="8" width="338" height="44" rx="8"/><text x="16" y="35">1 · Формат файла</text><text class="s" x="324" y="35" text-anchor="end">сделано</text></g>
+        <line class="ar" x1="170" y1="53" x2="170" y2="63"/><polygon class="ah" points="165,62 175,62 170,69"/>
+        <g class="b b-done"><rect x="1" y="70" width="338" height="44" rx="8"/><text x="16" y="97">2 · Кнопка выгрузки</text><text class="s" x="324" y="97" text-anchor="end">сделано</text></g>
+        <line class="ar" x1="170" y1="115" x2="170" y2="125"/><polygon class="ah" points="165,124 175,124 170,131"/>
+        <g class="b b-run"><rect x="1" y="132" width="338" height="44" rx="8"/><text x="16" y="159">3 · Выгрузка за период</text><text class="s" x="324" y="159" text-anchor="end">идёт</text></g>
+        <line class="ar" x1="170" y1="177" x2="170" y2="187"/><polygon class="ah" points="165,186 175,186 170,193"/>
+        <g class="b b-todo"><rect x="1" y="194" width="338" height="44" rx="8"/><text x="16" y="221">4 · Большие выгрузки</text><text class="s" x="324" y="221" text-anchor="end">впереди</text></g>
+        <line class="ar" x1="170" y1="239" x2="170" y2="249"/><polygon class="ah" points="165,248 175,248 170,255"/>
+        <g class="b b-todo"><rect x="1" y="256" width="338" height="44" rx="8"/><text x="16" y="283">5 · Проверка на телефоне</text><text class="s" x="324" y="283" text-anchor="end">впереди</text></g>
+      </svg>
+      <figcaption>Очередь шагов задачи сверху вниз.</figcaption>
+    </figure>
+    <p>Шаги идут сверху вниз. Движок запускает сессию на первый несделанный шаг, одну итерацию за другой.</p>
+    <p>Вопрос сессии останавливает цикл: шаг ждёт ответа, следующие не начинаются. На сбой итерации оркестратор смотрит сам: перезапускает движок или спрашивает пользователя.</p>
+  </section>
+
+  <section>
+    <h2>Сейчас</h2>
+    <p>Движок ведёт итерацию 4 с 14:05. Сессия делает шаг «Выгрузка за период»: клиент выбирает даты «с» и «по», в файл попадают расходы только за эти дни.</p>
+    <p>Последнее действие сессии — запуск тестов выгрузки в 14:29.</p>
+    <p>Дальше сессия закроет шаг или задаст вопрос. Шаг закрыт — движок сам начнёт итерацию 5 со шага «Большие выгрузки».</p>
+    <h3>Риски и неизвестное</h3>
+    <ul>
+      <li><span class="kind">Оценка:</span> итерация идёт 11–38 минут — по трём прошлым итерациям этой задачи.</li>
+      <li><span class="kind">Неизвестно:</span> сколько расходов у самого крупного клиента за год. От этого зависит шаг «Большие выгрузки»: файл на десятки тысяч строк может собираться дольше, чем хостинг ждёт ответа. Узнать можно подсчётом в базе приложения.</li>
+      <li><span class="kind">Риск:</span> не выявлено.</li>
+    </ul>
+    <details>
+      <summary>Ход итерации 4</summary>
+      <ul>
+        <li>14:05 — сессия прочитала таск-файл и правила проекта.</li>
+        <li>14:07 — сессия прочитала код выгрузки.</li>
+        <li>14:12 — сессия добавила выбор дат на страницу выгрузки.</li>
+        <li>14:20 — сессия дописала отбор расходов по датам.</li>
+        <li>14:29 — сессия запустила тесты выгрузки.</li>
+      </ul>
+    </details>
+  </section>
+
+  <section>
+    <h2>Итерации</h2>
+    <p class="note">Итерация — одна сессия, которую движок запустил на шаг. Новые сверху.</p>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Итерация</th><th>Шаг</th><th>Исход</th></tr></thead>
+        <tbody>
+          <tr class="it"><td class="nw">4 · 14:05<br>27 мин</td><td>Выгрузка за период</td><td><span class="st st-run">идёт</span></td></tr>
+          <tr class="cm"><td colspan="3">коммитов пока нет</td></tr>
+          <tr class="it"><td class="nw">3 · 13:22<br>38 мин</td><td>Кнопка выгрузки</td><td><span class="st st-done">сделано</span></td></tr>
+          <tr class="cm"><td colspan="3"><span class="commit">4c1e9a2 feat(export): export button</span><span class="commit">7d03b5f docs: export-csv button, journal</span></td></tr>
+          <tr class="it"><td class="nw">2 · 12:48<br>22 мин</td><td>Формат файла</td><td><span class="st st-done">сделано</span></td></tr>
+          <tr class="cm"><td colspan="3"><span class="commit">2b8e6d1 feat(export): csv writer</span><span class="commit">e5a0c47 docs: export-csv format, journal</span></td></tr>
+          <tr class="it"><td class="nw">1 · 12:10<br>33 мин</td><td>Формат файла</td><td><span class="st st-wait">вопрос</span></td></tr>
+          <tr class="cm"><td colspan="3"><span class="commit">91af3c0 wip(export): csv format, blocker</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>Вопросы и ответы</h2>
+    <p class="note">Вопросы, на которых сессия останавливала цикл, и кто ответил. Новые сверху.</p>
+    <div class="qa">
+      <p class="meta"><span>2026-10-11 12:44</span><span>шаг «Формат файла»</span><span>ответил оркестратор</span></p>
+      <p>Какая кодировка нужна, чтобы Excel на Windows показал русские буквы в файле?</p>
+      <p><span class="kind">Ответ:</span> UTF-8 с меткой кодировки в начале файла. Без метки Excel на Windows читает файл в кодировке системы, и буквы искажаются. <span class="kind">Факт</span> — справка Microsoft об открытии CSV в Excel.</p>
+    </div>
+  </section>
+
+  <details>
+    <summary>Кто здесь действует</summary>
+    <ul>
+      <li>Движок — скрипт на компьютере пользователя: запускает сессии по шагам одну за другой и пишет журнал цикла.</li>
+      <li>Сессия — Claude в контейнере, запущенный движком на один шаг: делает шаг и записывает итог в таск-файл.</li>
+      <li>Оркестратор — Claude на компьютере пользователя: следит за движком, сам отвечает на вопросы, которые снимает проверкой, остальные задаёт пользователю.</li>
+      <li>Пользователь — ты: выбираешь на развилках и проверяешь сделанное.</li>
+    </ul>
+  </details>
+</main>
