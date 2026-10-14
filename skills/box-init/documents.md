@@ -13,7 +13,7 @@
 │                        # (@docs/RULES.md, @docs/README.md, @docs/PROTOCOL.md), суть проекта,
 │                        # жёсткие ограничения, грабли, точки входа
 ├── README.md            # для человека: quick start, запуск, деплой
-├── compose.yml          # сервис claude: Claude Code в контейнере, docker compose run --rm claude
+├── claude-box.yml       # сервис claude вне git проекта: Claude Code в контейнере, docker compose -f claude-box.yml run --rm claude
 ├── docs/
 │   ├── README.md        # карта документации: source of truth каждого дока
 │   ├── RULES.md         # конвенции кода и работы, включая поведение агента
