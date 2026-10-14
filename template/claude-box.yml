@@ -1,8 +1,9 @@
-# Claude Code в контейнере: docker compose run --rm claude [флаги claude]
+# Claude Code в контейнере, файл этой машины под .gitignore проекта: docker compose -f claude-box.yml run --rm claude [флаги claude]
+# строка name: основного compose-файла проекта — та же здесь, над services: с одним именем проекта Compose Claude в сети сервисов проекта, база доступна по имени сервиса
 services:
   claude:
     image: maksim44/claude-box
-    # обычный docker compose up проекта этот сервис пропускает
+    # запуск только командой run: docker compose -f claude-box.yml up сервис пропускает
     profiles: [claude]
     stdin_open: true
     tty: true
@@ -17,8 +18,8 @@ services:
     working_dir: /workspace/${COMPOSE_PROJECT_NAME}
     volumes:
       - .:/workspace/${COMPOSE_PROJECT_NAME}
-      # только на чтение поверх папки проекта: compose-файл задаёт контейнер следующего запуска, настройки и хуки git выполняет git хоста, строка списка исключений .git/info/exclude прячет файл от git без следа в файлах проекта — её дописывает человек на хосте
-      - ./compose.yml:/workspace/${COMPOSE_PROJECT_NAME}/compose.yml:ro
+      # только на чтение поверх папки проекта: этот файл задаёт контейнер следующего запуска, настройки и хуки git выполняет git хоста, строка списка исключений .git/info/exclude прячет файл от git без следа в файлах проекта — её дописывает человек на хосте
+      - ./claude-box.yml:/workspace/${COMPOSE_PROJECT_NAME}/claude-box.yml:ro
       - ./.git/config:/workspace/${COMPOSE_PROJECT_NAME}/.git/config:ro
       - ./.git/hooks:/workspace/${COMPOSE_PROJECT_NAME}/.git/hooks:ro
       - ./.git/info:/workspace/${COMPOSE_PROJECT_NAME}/.git/info:ro

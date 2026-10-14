@@ -18,6 +18,7 @@
       "Edit(/compose.override.yml)",
       "Edit(/docker-compose.override.yaml)",
       "Edit(/docker-compose.override.yml)",
+      "Edit(/claude-box.yml)",
       "Edit(/.claude/settings.json)",
       "Edit(/.claude/settings.local.json)",
       "Bash(git push --force *)",

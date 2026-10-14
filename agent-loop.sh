@@ -2,7 +2,7 @@
 # Движок автоцикла: итерации /box-next по задаче проекта, пока статус таск-файла «в работе» или «блокер» с ответом пользователя.
 # Запуск на хосте из папки проекта: agent-loop.sh [--host | --no-firewall] [--quiet] <задача>; из любой папки — путём к таск-файлу: agent-loop.sh [--host | --no-firewall] [--quiet] <проект>/docs/tasks/<задача>.md
 # Первый раз на машине — ./agent-loop.sh в папке клона: скрипт ставит себя командой agent-loop.sh ссылкой в ~/.local/bin.
-# Итерации идут в контейнере — сервисе claude проекта: сеть ограничена списком адресов, режим без вопросов о разрешениях;
+# Итерации идут в контейнере — сервисе claude из claude-box.yml проекта: сеть ограничена списком адресов, режим без вопросов о разрешениях;
 # --no-firewall — сеть контейнера открыта, режим auto; --host — итерации claude хоста в режиме auto.
 # Уведомления в Telegram — при TELEGRAM_BOT_TOKEN и TELEGRAM_CHAT_ID в ~/.config/agent-loop.env, иначе остановки видны только в терминале;
 # --quiet — остановки только в терминале и при настроенном боте.
@@ -157,14 +157,9 @@ file=docs/tasks/$task.md
 [ -f "$file" ] || stop 2 "нет таск-файла $file"
 project=$(basename "$root")
 
-# compose-файл проекта — явным -f, имя — в порядке поиска Compose: контейнер собирается только по нему, дополнения рядом и COMPOSE_FILE из .env в сборку не входят
-cf=
-if [ -z "$host" ]; then
-  for f in compose.yaml compose.yml docker-compose.yaml docker-compose.yml; do
-    [ -f "$f" ] && { cf=$f; break; }
-  done
-  [ -n "$cf" ] || stop 2 "нет compose-файла с сервисом claude в корне проекта — его кладёт /box-init; итерации на хосте — $me --host $target"
-fi
+# сервис claude — в claude-box.yml проекта явным -f: контейнер собирается только по нему, основной compose-файл проекта, дополнения и COMPOSE_FILE из .env в сборку не входят
+cf=claude-box.yml
+[ -n "$host" ] || [ -f "$cf" ] || stop 2 "нет $cf в корне проекта — его кладёт /box-init; итерации на хосте — $me --host $target"
 
 # режим итераций: в контейнере без --no-firewall — точка входа claude-box-firewall ограничивает сеть, и вопросов о разрешениях нет
 mode=auto
@@ -353,12 +348,13 @@ $services"
   # окружение итерации: сигнал context-guard — протокол молча; кэш промпта на пять минут вместо часового по умолчанию подписки — отсчёт идёт
   # от последнего вызова, вызовы внутри итерации идут чаще, а следующая итерация стартует новой сессией; запись в кэш на час стоит 2× входа, на пять минут — 1,25×.
   # контейнер: -T — stdout с JSON итога отдельно от stderr; ввод — /dev/null: -p добавляет поданный ввод к промпту,
-  # а открытый ввод контейнера не кончается; --progress quiet — в stderr только ошибки.
+  # а открытый ввод контейнера не кончается; --progress quiet — в stderr только ошибки; COMPOSE_IGNORE_ORPHANS убирает строку о контейнерах
+  # основного compose-файла проекта: для claude-box.yml с тем же именем проекта Compose они чужие.
   # Код выхода claude compose возвращает; на Ctrl+C отдаёт SIGINT сессии и сам выходит с 130, не дожидаясь итога
   if [ -n "$host" ]; then
     CONTEXT_GUARD_MODE=protocol CLAUDE_CODE_PROMPT_CACHE_TTL=5m claude "${args[@]}"
   else
-    docker compose -f "$cf" --progress quiet run --rm -T "${fw[@]}" -e CONTEXT_GUARD_MODE=protocol -e CLAUDE_CODE_PROMPT_CACHE_TTL=5m claude "${args[@]}" </dev/null
+    COMPOSE_IGNORE_ORPHANS=true docker compose -f "$cf" --progress quiet run --rm -T "${fw[@]}" -e CONTEXT_GUARD_MODE=protocol -e CLAUDE_CODE_PROMPT_CACHE_TTL=5m claude "${args[@]}" </dev/null
   fi >"$tmp/out" 2>"$tmp/err"
   code=$?
   kill "$timer" 2>/dev/null

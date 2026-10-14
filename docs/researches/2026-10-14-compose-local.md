@@ -25,3 +25,13 @@
 - Движок передаёт Compose `COMPOSE_IGNORE_ORPHANS=true`; при ручном запуске предупреждение остаётся.
 - Контейнер агента задаёт один `claude-box.yml` с явным `-f`: основной compose-файл проекта на контейнер следующего запуска уже не влияет.
 - Абсолютный путь к основному репозиторию worktree — путь этой машины: подключение `.git` основного репозитория ложится в тот же файл под `.gitignore`.
+
+## Проба образца и движка — шаг «Отдельный файл», Compose 5.6.0, образ `maksim44/claude-box` от 2026-10-14
+
+Временная папка: копия `template/` с `claude-box.yml` образца, git-репозиторий, основной `compose.yml` с сервисом `db` (`alpine`, `sleep 3600`) и строкой `name: shopprobe`, та же строка в `claude-box.yml` над `services:`.
+
+- `/claude-box.yml` в `.gitignore` образца: `git check-ignore` называет эту строку, `git status --porcelain` после коммита пуст.
+- `docker compose -f claude-box.yml --profile claude config --services` печатает `claude`.
+- Проект поднят `docker compose up -d`; `docker compose -f claude-box.yml run --rm --entrypoint getent claude hosts db` печатает адрес базы (`172.31.0.2 db`) и перед ним строку `Found orphan containers (shopprobe-db-1) … --remove-orphans`. С `COMPOSE_IGNORE_ORPHANS=true` строки в stderr нет.
+- `docker compose -f claude-box.yml run --rm --remove-orphans --entrypoint true claude` удаляет контейнер базы проекта: `Container shopprobe-db-1 Removed`, контейнеров проекта после запуска нет.
+- `agent-loop.sh --quiet t` из папки при поднятой базе, задача из одного шага — файл со строкой: итерация в контейнере из `claude-box.yml` за ограничением сети закончилась за 38 с, 6 ходов, двумя коммитами — шаг и журнал, статус «готово», код выхода движка 0.

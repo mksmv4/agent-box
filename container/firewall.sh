@@ -1,14 +1,14 @@
 #!/bin/bash
 # Ограничение сети контейнера для итераций движка автоцикла: исходящие — только на разрешённые адреса, затем обычный скрипт запуска claude-box.
-# Вызов — точкой входа: docker compose run --rm --entrypoint claude-box-firewall claude [флаги claude]; так итерации запускает agent-loop.sh.
-# Нужны права NET_ADMIN и NET_RAW сервиса claude — строка cap_add в compose-файле проекта.
+# Вызов — точкой входа: docker compose -f claude-box.yml run --rm --entrypoint claude-box-firewall claude [флаги claude]; так итерации запускает agent-loop.sh.
+# Нужны права NET_ADMIN и NET_RAW сервиса claude — строка cap_add в claude-box.yml проекта.
 set -euo pipefail
 
 say() { printf 'claude-box-firewall: %s\n' "$*" >&2; }
 
 err=$(iptables -S 2>&1 >/dev/null) || {
   say "правила сети не ставятся: $err"
-  say "сервису claude в compose-файле проекта нужна строка cap_add: [NET_ADMIN, NET_RAW]"
+  say "сервису claude в claude-box.yml проекта нужна строка cap_add: [NET_ADMIN, NET_RAW]"
   exit 1
 }
 
