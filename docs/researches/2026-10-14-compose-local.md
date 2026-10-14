@@ -35,3 +35,18 @@
 - Проект поднят `docker compose up -d`; `docker compose -f claude-box.yml run --rm --entrypoint getent claude hosts db` печатает адрес базы (`172.31.0.2 db`) и перед ним строку `Found orphan containers (shopprobe-db-1) … --remove-orphans`. С `COMPOSE_IGNORE_ORPHANS=true` строки в stderr нет.
 - `docker compose -f claude-box.yml run --rm --remove-orphans --entrypoint true claude` удаляет контейнер базы проекта: `Container shopprobe-db-1 Removed`, контейнеров проекта после запуска нет.
 - `agent-loop.sh --quiet t` из папки при поднятой базе, задача из одного шага — файл со строкой: итерация в контейнере из `claude-box.yml` за ограничением сети закончилась за 38 с, 6 ходов, двумя коммитами — шаг и журнал, статус «готово», код выхода движка 0.
+
+## Проба worktree — шаг «Worktree», Compose 5.6.0, git хоста 2.43.0, образ `maksim44/claude-box` от 2026-10-14 с git 2.39.5
+
+Временная папка: основной репозиторий `main` с `compose.yml` (сервис `db`, строка `name: wtprobe`) и `.gitignore` со строкой `/claude-box.yml`; дополнительная рабочая копия `git worktree add ../feat -b feat`, у неё `.git` — файл со строкой `gitdir: <временная папка>/main/.git/worktrees/feat`. Команды в контейнере — от `node`, скриптом пробы вместо скрипта запуска.
+
+- `claude-box.yml` образца в `feat` с той же строкой `name:`: контейнер не стартует — `open …/feat/.git/config: not a directory`, код 1; файл `.git` рабочей копии остаётся как был.
+- Тот же файл, где три подключения `./.git/…` заменены на `.git` основного репозитория по его абсолютному пути и поверх только на чтение его `config`, `hooks`, `info` по тем же путям: `git status` в контейнере — `## feat`, коммит проходит; запись, `mv` и `rm` в `config`, `hooks`, `info` и `info/exclude` основного репозитория отклоняются — `Read-only file system`, `Device or resource busy`. На хосте `git -C main log feat` видит коммит из контейнера, `config`, хуки и `info/exclude` основного репозитория целы.
+- Первый запуск без compose — `docker run` из `README.md` § Запуск с теми же четырьмя подключениями, путь основного `.git` — `git rev-parse --path-format=absolute --git-common-dir` на хосте: тот же итог — `git status` и коммит проходят, запись, `mv` и `rm` отклоняются.
+- Файл `.git` рабочей копии и файл `commondir` в её папке `.git/worktrees/feat` основного репозитория из контейнера открыты на запись (`test -w`): строка в любом из них переадресует git рабочей копии к другим настройкам — тот же класс, что `.git/commondir` основной копии (`ARCHITECTURE.md` § Ступени изоляции, «Открыто»); выполнит ли git хоста команду из таких настроек, не проверено.
+- Путь папки проекта в контейнере — `/workspace/${COMPOSE_PROJECT_NAME}`: строка `name:` основного compose-файла, общая у основной копии и рабочих копий из git, даёт им один путь — `/workspace/wtprobe` у обеих, — а к нему привязаны сессии, автопамять и доверие Claude Code. Без строки имя идёт от папки, и у каждой копии свой путь.
+
+## Выводы шага «Worktree»
+
+- Дополнительной рабочей копии нужен в контейнере `.git` основного репозитория по тому же абсолютному пути, что на хосте: строка `gitdir:` указывает туда. Защита та же, что у основной копии, — `config`, `hooks`, `info` основного репозитория только на чтение поверх его подключения.
+- Первый запуск в рабочей копии до `/box-init` — `docker run` с этими четырьмя подключениями, путь — от git хоста. `/box-init` берёт путь из строки `gitdir:` — `<основной .git>/worktrees/<имя>` — и пишет подключения в `claude-box.yml` вместо трёх подключений `./.git/…` образца.
