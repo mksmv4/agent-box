@@ -7,16 +7,18 @@
 # Уведомления в Telegram — при TELEGRAM_BOT_TOKEN и TELEGRAM_CHAT_ID в ~/.config/agent-loop.env, иначе остановки видны только в терминале;
 # --quiet — остановки только в терминале и при настроенном боте.
 # Журнал цикла — .git/agent-loop.log проекта, путь — в строке старта: запуски, итерации с ходом сессии, остановки.
+# Пределы цикла — agent-box.yml в корне проекта, строки «ключ: целое число»; нет файла или ключа — значение по умолчанию ниже.
 # Код выхода: 0 — «готово» или лимит итераций; 1 — остановка, ждущая пользователя; 2 — движок не запустился; 130 — Ctrl+C.
 # Правило песочницы claude-box для сессии Claude хоста, которая ведёт движок, — agent-loop.sh --sandbox-rule человеком в терминале, раз на машину:
 # исключение классификатора режима auto в ~/.claude/settings.json; повторный запуск заменяет его. Код выхода: 0 — Claude Code видит правило; 1 — не видит; 2 — не записано.
 set -u
 
+# пределы цикла по умолчанию; поверх — agent-box.yml проекта
 max_iter=10   # итераций за запуск
 pause=10      # секунд между итерациями — окно чистой остановки Ctrl+C
 max_idle=3    # итераций подряд без прогресса
 max_turns=200 # потолок ходов итерации
-alert=3600    # секунд итерации до алерта таймера
+alert=60      # минут итерации до алерта таймера
 
 say() { printf 'agent-loop: %s\n' "$*"; }
 
@@ -156,6 +158,46 @@ file=docs/tasks/$task.md
 [ -z "$path" ] || [ "$(realpath "$file" 2>/dev/null)" = "$path" ] || stop 2 "таск-файл $path вне docs/tasks/ проекта $root"
 [ -f "$file" ] || stop 2 "нет таск-файла $file"
 project=$(basename "$root")
+
+# пределы цикла из agent-box.yml корня проекта — один раз на запуск: строка «ключ: целое число», комментарии # и пустые строки пропускаются.
+# split_chars — порог раздела документации для /box-init и сессий, движку он не нужен. Неизвестный ключ или не число — отказ запуска с номером строки
+conf=agent-box.yml
+from=
+if [ -f "$conf" ]; then
+  n=0
+  while IFS= read -r raw || [ -n "$raw" ]; do
+    n=$((n + 1))
+    line=${raw%%#*}
+    [[ $line =~ ^[[:space:]]*$ ]] && continue
+    [[ $line =~ ^([a-z_]+):[[:space:]]*([^[:space:]]*)[[:space:]]*$ ]] ||
+      stop 2 "$conf, строка $n: «$raw» — нужна строка вида «ключ: целое число»"
+    key=${BASH_REMATCH[1]} value=${BASH_REMATCH[2]}
+    case $key in
+      max_iterations) var=max_iter ;;
+      pause_seconds) var=pause ;;
+      max_idle_iterations) var=max_idle ;;
+      max_turns) var=max_turns ;;
+      alert_minutes) var=alert ;;
+      split_chars) var= ;;
+      *) stop 2 "$conf, строка $n: неизвестный ключ «$key» — известные: max_iterations, pause_seconds, max_idle_iterations, max_turns, alert_minutes, split_chars" ;;
+    esac
+    [[ $value =~ ^[0-9]+$ ]] || stop 2 "$conf, строка $n: у ключа $key значение «$value» — нужно целое число"
+    [ -z "$var" ] || { printf -v "$var" %d "$((10#$value))"; from+=" $var"; }
+  done <"$conf"
+fi
+# строка старта: действующие пределы по источнику — agent-box.yml или значение по умолчанию
+own= def=
+for d in max_iter:'итераций за запуск %s' pause:'пауза %s с' max_idle:'итераций подряд без прогресса %s' max_turns:'ходов итерации %s' alert:'алерт таймера через %s мин'; do
+  var=${d%%:*}
+  printf -v item "${d#*:}" "${!var}"
+  case "$from " in
+    *" $var "*) own+=${own:+, }$item ;;
+    *) def+=${def:+, }$item ;;
+  esac
+done
+none=
+[ -f "$conf" ] || none=" ($conf нет)"
+say "пределы цикла${own:+ из $conf: $own}${own:+${def:+;}}${def:+ по умолчанию$none: $def}"
 
 # сервис claude — в claude-box.yml проекта явным -f: контейнер собирается только по нему, основной compose-файл проекта, дополнения и COMPOSE_FILE из .env в сборку не входят
 cf=claude-box.yml
@@ -334,9 +376,9 @@ $services"
   # таймер итерации: порог пройден — алерт, итерация идёт дальше
   (
     trap 'kill $! 2>/dev/null; exit' TERM
-    sleep "$alert" &
+    sleep "$((alert * 60))" &
     wait
-    msg="задача $task — итерация $i идёт дольше $((alert / 60)) мин, сессия $sid; итерация продолжается
+    msg="задача $task — итерация $i идёт дольше $alert мин, сессия $sid; итерация продолжается
 дальше: ждать; вмешательство — $resume или Ctrl+C в терминале движка"
     say "$msg"
     logl "$msg"
