@@ -56,5 +56,18 @@ jq -n --argjson hook "$hook" --arg sl "$statusline" \
   * (if $sl != "" then {statusLine: ($h.statusLine + {command: $sl})} else {} end)' > "$home/.claude/settings.json"
 chown node:node "$home/.claude/settings.json"
 
+# конфиг agent-box — config.yml клона: порог раздела документации для /box-init и протокола, свежая копия в /etc/claude-box/config.yml, агенту только на чтение.
+# Клон — цель ссылки ~/.local/bin/agent-loop.sh хоста, путь хоста: от него отрезаются ведущие части, пока остаток не найдётся в домашней папке хоста.
+# Клон вне домашней папки хоста или ссылки нет — копии нет, сессии берут порог по умолчанию
+conf=/etc/claude-box/config.yml
+rm -f "$conf"
+rest=$(readlink "$host/.local/bin/agent-loop.sh" || true)
+while [ "$rest" != "${rest#*/}" ]; do
+  rest=${rest#*/}
+  [ -f "$host/$rest" ] || continue
+  [ ! -f "$host/${rest%/*}/config.yml" ] || cp "$host/${rest%/*}/config.yml" "$conf"
+  break
+done
+
 # переменные .env проекта получают только Claude Code и команды агента: файл читается уже от node, часть скрипта от root работает без них
 exec $as_node claude-box-env .env claude "$@"
