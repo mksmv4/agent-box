@@ -11,7 +11,6 @@
       "Read(.env.staging)",
       "Read(.env.test)",
       "Edit(/claude-box.yml)",
-      "Edit(/agent-box.yml)",
       "Edit(/.claude/settings.json)",
       "Edit(/.claude/settings.local.json)",
       "Bash(git push --force *)",
