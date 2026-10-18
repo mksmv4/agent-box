@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Движок автоцикла: итерации /box-next по задаче проекта, пока статус таск-файла «в работе» или «блокер» с ответом пользователя.
 # Запуск на хосте из папки проекта: agent-loop.sh [--host | --no-firewall] [--quiet] <задача>; из любой папки — путём к таск-файлу: agent-loop.sh [--host | --no-firewall] [--quiet] <проект>/docs/tasks/<задача>.md
-# Первый раз на машине — ./agent-loop.sh в папке клона: скрипт ставит себя командой agent-loop.sh ссылкой в ~/.local/bin.
+# Первый раз на машине — ./agent-loop.sh в папке клона: скрипт ставит себя и box-connect командами ссылками в ~/.local/bin.
 # Итерации идут в контейнере — сервисе claude из claude-box.yml проекта: сеть ограничена списком адресов, режим без вопросов о разрешениях;
 # --no-firewall — сеть контейнера открыта, режим auto; --host — итерации claude хоста в режиме auto.
 # Уведомления в Telegram — при TELEGRAM_BOT_TOKEN и TELEGRAM_CHAT_ID в ~/.config/agent-loop.env, иначе остановки видны только в терминале;
@@ -102,15 +102,16 @@ sandbox_rule() {
   exit 0
 }
 
-# команда agent-loop.sh по имени: ссылка на этот скрипт в ~/.local/bin; папки нет в PATH — запуск полным адресом.
-# Ссылка от перенесённого клона заменяется. me — команда запуска в подсказках движка; self — сам скрипт в клоне, рядом с ним конфиг
+# команды agent-loop.sh и box-connect по имени: ссылки на скрипты клона в ~/.local/bin; папки нет в PATH — запуск полным адресом.
+# Ссылки от перенесённого клона заменяются. me — команда запуска в подсказках движка; self — сам скрипт в клоне, рядом с ним конфиг
 me=agent-loop.sh
 self=$(realpath "$0")
-if ! command -v agent-loop.sh >/dev/null; then
+if ! command -v agent-loop.sh >/dev/null || ! command -v box-connect >/dev/null; then
   case ":$PATH:" in
     *":$HOME/.local/bin:"*)
       mkdir -p ~/.local/bin && ln -sf "$self" ~/.local/bin/agent-loop.sh &&
-        say "agent-loop.sh теперь запускается по имени из любой папки" ;;
+        ln -sf "$(dirname "$self")"/box-connect ~/.local/bin/box-connect &&
+        say "agent-loop.sh и box-connect теперь запускаются по имени из любой папки" ;;
     *)
       me=$self
       say "папки ~/.local/bin нет в PATH — запуск полным адресом" ;;

@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Первый запуск Claude в контейнере в папке проекта, где claude-box.yml ещё нет, — до /box-init.
+# Запуск на хосте из папки проекта: box-connect; команду ставит ./agent-loop.sh в папке клона ссылкой в ~/.local/bin.
+# Имя папки приводится к имени проекта Compose: путь в контейнере — тот же, что у запусков через claude-box.yml,
+# и сессии, автопамять и доверие Claude Code у проекта общие.
+# Рабочая копия git (.git — файл): .git основного репозитория — по тому же пути, его настройки, хуки и список исключений — только на чтение.
+set -euo pipefail
+
+n=$(basename "$PWD" | tr A-Z a-z | tr -cd 'a-z0-9_-' | sed 's/^[-_]*//')
+wt=()
+if [ -f .git ]; then
+  g=$(git rev-parse --path-format=absolute --git-common-dir)
+  wt=(-v "$g":"$g" -v "$g"/config:"$g"/config:ro -v "$g"/hooks:"$g"/hooks:ro -v "$g"/info:"$g"/info:ro)
+fi
+exec docker run --rm -it -v "$PWD":/workspace/"$n" -w /workspace/"$n" "${wt[@]}" \
+  -v "$HOME"/.claude-box:/home/node -v "$HOME":/root/host-home:ro maksim44/claude-box
