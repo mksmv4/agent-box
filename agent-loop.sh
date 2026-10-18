@@ -159,8 +159,9 @@ file=docs/tasks/$task.md
 [ -f "$file" ] || stop 2 "нет таск-файла $file"
 project=$(basename "$root")
 
-# пределы цикла из config.yml клона, рядом с движком, — один раз на запуск: строка «ключ: целое число», комментарии # и пустые строки пропускаются.
-# split_chars — порог раздела документации для /box-init и сессий, движку он не нужен. Неизвестный ключ или не число — отказ запуска с номером строки
+# пределы цикла из config.yml клона, рядом с движком, — один раз на запуск: строка «ключ: значение», комментарии # и пустые строки пропускаются.
+# split_chars — порог раздела документации для /box-init и сессий, page_agent_model и check_agent_model — модели помощников оркестратора: движку они не нужны, у моделей проверяется вид значения.
+# Неизвестный ключ или значение не того вида — отказ запуска с номером строки
 conf=$(dirname "$self")/config.yml
 from=
 if [ -f "$conf" ]; then
@@ -170,7 +171,7 @@ if [ -f "$conf" ]; then
     line=${raw%%#*}
     [[ $line =~ ^[[:space:]]*$ ]] && continue
     [[ $line =~ ^([a-z_]+):[[:space:]]*([^[:space:]]*)[[:space:]]*$ ]] ||
-      stop 2 "$conf, строка $n: «$raw» — нужна строка вида «ключ: целое число»"
+      stop 2 "$conf, строка $n: «$raw» — нужна строка вида «ключ: значение»"
     key=${BASH_REMATCH[1]} value=${BASH_REMATCH[2]}
     case $key in
       max_iterations) var=max_iter ;;
@@ -179,7 +180,10 @@ if [ -f "$conf" ]; then
       max_turns) var=max_turns ;;
       alert_minutes) var=alert ;;
       split_chars) var= ;;
-      *) stop 2 "$conf, строка $n: неизвестный ключ «$key» — известные: max_iterations, pause_seconds, max_idle_iterations, max_turns, alert_minutes, split_chars" ;;
+      page_agent_model | check_agent_model)
+        [[ $value =~ ^[a-z]+$ ]] || stop 2 "$conf, строка $n: у ключа $key значение «$value» — нужен алиас модели: opus, sonnet, haiku или fable"
+        continue ;;
+      *) stop 2 "$conf, строка $n: неизвестный ключ «$key» — известные: max_iterations, pause_seconds, max_idle_iterations, max_turns, alert_minutes, split_chars, page_agent_model, check_agent_model" ;;
     esac
     [[ $value =~ ^[0-9]+$ ]] || stop 2 "$conf, строка $n: у ключа $key значение «$value» — нужно целое число"
     [ -z "$var" ] || { printf -v "$var" %d "$((10#$value))"; from+=" $var"; }
