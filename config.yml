@@ -23,7 +23,7 @@ alert_minutes: 60
 split_chars: 50000
 
 # модель агента страницы — подагента оркестратора, который ведёт страницу задачи на claude.ai: opus, sonnet, haiku или fable
-page_agent_model: opus
+page_agent_model: sonnet
 
 # модель агента проверок — подагента оркестратора, который проверяет вопрос блокера: opus, sonnet, haiku или fable
-check_agent_model: opus
+check_agent_model: sonnet
