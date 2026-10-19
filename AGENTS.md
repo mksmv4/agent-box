@@ -32,7 +32,7 @@ agent-box — обвязка проектов под работу с Claude Code
 
 ## Точки входа
 
-- `README.md` — для человека: quick start, запуск, пересборка образа
+- `README.md` — для человека: быстрый старт, задача скриптом и оркестратором, обновление agent-box и проектов, пересборка образа
 - `template/` — образец проекта, который `/box-init` кладёт в проект
 - `template/docs/PROTOCOL.md` — рабочий оригинал протокола
 - `template/.claude/skills/box-next/SKILL.md` — рабочий оригинал `/box-next`
