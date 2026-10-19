@@ -1,5 +1,7 @@
+<!-- page:title -->
 <title>export-csv · Учёт расходов</title>
-<!-- страница задачи по правилам pages.md скилла box-orchestrate; здесь — пример: задача и проект вымышленные, открыт вопрос пользователю -->
+<!-- /page:title -->
+<!-- страница задачи скилла box-orchestrate: куски между метками page: правит скрипт page.py по событиям оркестратора, устройство и метки — pages.md -->
 <style>
 /* токены цвета: светлая и тёмная тема */
 :root {
@@ -111,43 +113,8 @@ a:focus-visible, summary:focus-visible, button:focus-visible { outline: 2px soli
 .ask-top h2 { color: var(--wait); font-size: .8125rem; text-transform: uppercase; letter-spacing: .05em; }
 .ask-top .q { font-size: 1.125rem; font-weight: 600; line-height: 1.35; }
 .ask-body { display: grid; gap: 10px; padding: 16px; min-width: 0; }
-/* находка проверки: нейтральная рамка с номером, цепочка «что случилось → чем грозит → что чинит» */
-.find { display: grid; gap: 6px; padding: 12px; border: 1px solid var(--line); border-left: 3px solid var(--muted); border-radius: 6px; scroll-margin-top: 16px; }
 .opts { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr)); scroll-margin-top: 16px; }
 .opt { display: grid; gap: 6px; align-content: start; padding: 12px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; min-width: 0; scroll-margin-top: 16px; }
-/* схемы: SVG по ширине колонки, текст и линии цветом текста страницы */
-figure { margin: 0; max-width: 30rem; display: grid; gap: 8px; scroll-margin-top: 16px; }
-figure svg { display: block; width: 100%; height: auto; color: var(--fg); }
-figcaption { color: var(--muted); font-size: .875rem; }
-.legend { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; font-size: .875rem; color: var(--muted); }
-.legend svg { width: 28px; height: 10px; flex: none; color: var(--fg); }
-svg text { fill: currentColor; font-family: var(--font); font-size: 13px; }
-svg .s { font-size: 12px; font-weight: 600; }
-svg .hd { font-weight: 700; }
-svg .grp { fill: var(--muted); font-size: 12px; }
-svg .lb { font-size: 12px; }
-svg .ar { stroke: currentColor; stroke-width: 1.5; }
-svg .ah { fill: currentColor; }
-/* схема очереди: блок шага по состоянию */
-.b rect { stroke-width: 1.5; }
-.b-done rect { fill: var(--surface); stroke: var(--done); }
-.b-done .s { fill: var(--done); }
-.b-wait rect { fill: var(--wait-bg); stroke: var(--wait); }
-.b-wait .s { fill: var(--wait); }
-.b-run rect { fill: var(--run-bg); stroke: var(--run); }
-.b-run .s { fill: var(--run); }
-.b-fail rect { fill: var(--fail-bg); stroke: var(--fail); }
-.b-fail .s { fill: var(--fail); }
-.b-todo rect { fill: var(--surface); stroke: var(--muted); stroke-dasharray: 5 4; }
-.b-todo .s { fill: var(--muted); }
-/* схемы задачи, участников и вариантов: нейтральные блоки, граница — серой рамкой, отступление от правила — точками, крест — граница не пропустила */
-.b-n rect { fill: var(--surface); stroke: currentColor; }
-svg .fr { fill: none; stroke: var(--muted); stroke-width: 1.5; }
-svg .dev { stroke-width: 2.5; stroke-dasharray: 0 5; stroke-linecap: round; }
-svg .x { stroke: currentColor; stroke-width: 2.5; }
-/* кнопка «Крупнее» у схемы, её ставит скрипт */
-.zoom-btn { justify-self: end; padding: 3px 12px; font: inherit; font-size: .8125rem; font-weight: 600; color: var(--fg); background: var(--surface); border: 1px solid var(--line); border-radius: 999px; cursor: pointer; }
-@media (hover: hover) { .zoomable { cursor: zoom-in; } }
 /* история: черта и заголовок крупнее разделов — граница главного */
 .hist { display: grid; gap: 28px; padding-top: 14px; border-top: 2px solid var(--fg); scroll-margin-top: 16px; }
 .hist > header { display: grid; gap: 4px; }
@@ -166,46 +133,37 @@ summary { cursor: pointer; font-weight: 600; }
 details[open] > summary { margin-bottom: 4px; }
 .qa summary { font-weight: 400; }
 .qa summary .meta { display: inline-flex; margin-right: 6px; }
-code { font-family: var(--mono); font-size: .8125rem; overflow-wrap: anywhere; }
 /* кнопка «Наверх»: одна на страницу, внизу справа, появляется после двух экранов прокрутки */
 .top { position: fixed; right: 16px; bottom: 16px; padding: 10px 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 999px; font-size: .875rem; font-weight: 600; text-decoration: none; box-shadow: 0 2px 8px rgb(0 0 0 / .15); opacity: 0; pointer-events: none; transition: opacity .2s; }
 .top.on { opacity: 1; pointer-events: auto; }
-/* просмотр поверх страницы: слой во весь экран, сверху масштаб и «Закрыть», снизу подпись схемы */
-.zoom { inset: 0; width: 100%; height: 100%; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; background: var(--bg); color: var(--fg); }
-.zoom[open] { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; }
-.zoom::backdrop { background: var(--bg); }
-html:has(.zoom[open]) { overflow: hidden; }
-.zoom-bar { display: flex; align-items: center; gap: 8px; padding: 8px 16px; background: var(--surface); border-bottom: 1px solid var(--line); }
-.zoom-bar button { min-width: 40px; min-height: 40px; padding: 0 12px; font: inherit; font-weight: 600; color: var(--fg); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; cursor: pointer; }
-.zoom-bar button:disabled { color: var(--muted); cursor: default; }
-.zoom-bar output { min-width: 4.5em; text-align: center; font-variant-numeric: tabular-nums; }
-.zoom-close { margin-left: auto; }
-.zoom-view { display: flex; overflow: auto; padding: 16px; }
-.zoom-box { flex: none; margin: auto; }
-.zoom-in { transform-origin: 0 0; }
-.zoom-in svg { display: block; width: 100%; height: auto; color: var(--fg); }
-.zoom-in .scroll { overflow: visible; }
-.zoom-cap { max-height: 30vh; overflow: auto; padding: 10px 16px; color: var(--muted); font-size: .875rem; background: var(--surface); border-top: 1px solid var(--line); }
 </style>
 
 <div class="page" id="top">
   <header class="head">
+    <!-- page:name -->
     <p class="eyebrow">Задача export-csv · проект «Учёт расходов»</p>
     <h1>Выгрузка расходов в Excel и Google Таблицы</h1>
+    <!-- /page:name -->
+    <!-- page:meta -->
     <p class="meta">
       <span class="st st-wait">ждёт решения</span>
       <span>шаг 4 из 5</span>
       <span>7 итераций</span>
       <span>в работе с 2026-10-11 12:10</span>
     </p>
-    <p class="lead">Задача о том, как клиент выгружает свои расходы в таблицу за любой период. Три шага из пяти сделаны. В четвёртом выгрузка за год не успевает: хостинг обрывает ответ раньше, чем готов файл. Нужен твой выбор — <a href="#ask">к вопросу</a>.</p>
+    <!-- /page:meta -->
+    <p class="lead"><!-- page:lead -->Задача о том, как клиент выгружает свои расходы в таблицу за любой период.<!-- /page:lead --> <!-- page:where -->Шагов сделано — 3 из 5, шаг «Большие выгрузки» ждёт твоего решения — <a href="#ask">к вопросу</a>.<!-- /page:where --></p>
+    <!-- page:updated -->
     <p class="note">Обновлено 2026-10-11 16:44 по задаче и журналу цикла.</p>
+    <!-- /page:updated -->
   </header>
 
   <nav class="toc" aria-labelledby="toc-h">
     <p class="toc-h" id="toc-h">На этой странице</p>
     <ul>
+      <!-- page:toc-ask -->
       <li><a href="#ask">Ждёт решения</a></li>
+      <!-- /page:toc-ask -->
       <li><a href="#goal">Цель и шаги</a></li>
       <li><a href="#now">Сейчас</a></li>
       <li class="sep">История</li>
@@ -216,34 +174,37 @@ html:has(.zoom[open]) { overflow: hidden; }
   </nav>
 
   <main class="body">
+    <!-- page:ask -->
     <section class="ask" id="ask">
       <div class="ask-top">
         <h2>Ждёт решения</h2>
         <p class="q">Вопрос 2. Как отдавать выгрузку за большой период?</p>
-        <p>Ответ — один из <a href="#opts">двух вариантов ниже</a> в окне вопроса в чате оркестратора — Claude, который ведёт задачу. Свой вариант окно примет текстом.</p>
+        <p>Ответ — один из <a href="#opts-1">двух вариантов ниже</a> в окне вопроса в чате оркестратора — Claude, который ведёт задачу. Свой вариант окно примет текстом.</p>
       </div>
       <div class="ask-body">
         <p class="note">Вопрос 1 «Сколько расходов у самого крупного клиента за год?» оркестратор снял сам: 41 300 за 2025 год, по подсчёту в базе приложения 2026-10-11. Не так — поправь в чате до ответа на вопрос 2.</p>
-        <h3>Что происходит</h3>
-        <p>Клиент жмёт «Выгрузить» за целый год и вместо файла видит ошибку. Файл за год у самого крупного клиента собирается 70–90 секунд, по трём пробам сессии. Хостинг ждёт ответа приложения 60 секунд и обрывает его. Выгрузка за короткий период работает как надо. Пока способ не выбран, шаг 4 «Большие выгрузки» не закрыть.</p>
-        <h3>Варианты</h3>
-        <div class="opts" id="opts">
-          <div class="opt" id="opt-a">
+        <p class="kind">Что происходит</p>
+        <p>Клиент жмёт «Выгрузить» за целый год и вместо файла видит ошибку. Файл за год у самого крупного клиента собирается 70–90 секунд, по трём пробам сессии. Хостинг ждёт ответа приложения 60 секунд и обрывает его. Выгрузка за короткий период работает как надо.</p>
+        <p class="kind">Варианты</p>
+        <div class="opts" id="opts-1">
+          <div class="opt" id="opt-1-a">
             <h4>А — Файл в фоне, ссылка письмом</h4>
             <p>Клиент жмёт «Выгрузить» и видит «Файл готовится, ссылка придёт на почту»; ссылка живёт сутки. Цена — ещё один шаг в задаче, и письмо может попасть в спам — не проверено.</p>
           </div>
-          <div class="opt" id="opt-b">
+          <div class="opt" id="opt-1-b">
             <h4>Б — Период до трёх месяцев</h4>
             <p>Файл приходит сразу, как сейчас, но период длиннее трёх месяцев приложение не принимает и показывает подсказку. Цена — годовой отчёт клиент собирает из четырёх файлов.</p>
           </div>
         </div>
-        <p><b>Рекомендация</b> — <a href="#opt-b">вариант Б</a>: шагов не добавляет, и задача закончится раньше. Если целый год выгружают часто, лучше А; его можно добавить и позже отдельным шагом.</p>
+        <p><b>Рекомендация</b> — вариант Б: шагов не добавляет, и задача закончится раньше. Если целый год выгружают часто, лучше А; его можно добавить и позже отдельным шагом.</p>
       </div>
     </section>
+    <!-- /page:ask -->
 
     <section id="goal">
       <h2>Цель и шаги</h2>
-      <p class="note">Три части цели и шаги, которые к ним ведут.</p>
+      <p class="note">Цель по частям и шаги, которые к ней ведут.</p>
+      <!-- page:parts -->
       <div class="part" id="part1">
         <h3>Часть 1 — файл для таблиц</h3>
         <p>Клиент открывает файл в Excel или Google Таблицах, и русские буквы видны без настройки. Кнопка «Выгрузить» стоит на странице расходов.</p>
@@ -256,7 +217,9 @@ html:has(.zoom[open]) { overflow: hidden; }
         <h3>Часть 3 — телефон и компьютер</h3>
         <p>На телефоне выгрузка работает так же, как на компьютере: кнопка видна, файл скачивается.</p>
       </div>
+      <!-- /page:parts -->
       <h3>Очередь шагов</h3>
+      <!-- page:steps -->
       <ol>
         <li>Формат файла <span class="st st-done">сделано</span></li>
         <li>Кнопка выгрузки <span class="st st-done">сделано</span></li>
@@ -264,38 +227,41 @@ html:has(.zoom[open]) { overflow: hidden; }
         <li>Большие выгрузки <span class="st st-wait">ждёт решения</span></li>
         <li>Проверка на телефоне <span class="st st-todo">впереди</span></li>
       </ol>
+      <!-- /page:steps -->
     </section>
 
     <section id="now">
       <h2>Сейчас</h2>
-      <p>Движок стоит с 16:42: сессия итерации 7 остановила работу двумя вопросами. На вопрос 1 оркестратор ответил сам, вопрос 2 ждёт тебя.</p>
-      <p>После ответа оркестратор запишет оба ответа в задачу и снова запустит движок. Следующая сессия продолжит шаг 4. Что она сделает при каждом варианте — в <a href="#opts">вариантах вопроса</a>.</p>
+      <!-- page:now -->
+      <p>Движок стоит с 2026-10-11 16:42 и ждёт твоего решения: вопрос и что будет после каждого варианта — <a href="#ask">выше</a>. После ответа оркестратор — Claude, который ведёт задачу, — сделает по твоему выбору.</p>
+      <!-- /page:now -->
     </section>
 
     <div class="hist">
       <header>
         <h2>История</h2>
-        <p class="note">Как задача шла до этого места. Всё, что нужно для решения, — выше.</p>
+        <p class="note">Как задача шла до этого места. Где она стоит сейчас — выше.</p>
       </header>
 
       <section id="its">
         <h3>Итерации</h3>
         <p class="note">Итерация — одна сессия, которую движок запустил на шаг. Новые сверху.</p>
+        <!-- page:its -->
         <div class="scroll">
           <table>
             <thead><tr><th>Итерация</th><th>Шаг</th><th>Исход</th></tr></thead>
             <tbody>
               <tr class="day"><td colspan="3">2026-10-11</td></tr>
               <tr class="it"><td class="nw">7 · 16:08<br>34 мин</td><td>4 · Большие выгрузки</td><td><span class="st st-wait">ждёт решения</span></td></tr>
-              <tr class="cm"><td colspan="3">Трижды собрала пробный файл за год, нашла предел ожидания хостинга и остановилась на двух вопросах. <span class="hash">6f2d9e1</span></td></tr>
+              <tr class="cm"><td colspan="3">Шаг «Большие выгрузки» стоит на двух вопросах: сколько расходов за год у самого крупного клиента и как отдавать файл, который собирается дольше 60 секунд. <span class="hash">6f2d9e1</span></td></tr>
               <tr class="it"><td class="nw">6 · 15:46<br>21 мин</td><td>3 · Выгрузка за период</td><td><span class="st st-done">сделано</span></td></tr>
-              <tr class="cm"><td colspan="3">Перевела даты периода на часовой пояс клиента, проверки прошли. <span class="hash">0a7c3b8 3e91f52</span></td></tr>
+              <tr class="cm"><td colspan="3">Даты периода считаются по часовому поясу клиента, проверки прошли. Шаг «Выгрузка за период» закрыт. <span class="hash">0a7c3b8 3e91f52</span></td></tr>
               <tr class="it"><td class="nw">5 · 15:00<br>45 мин</td><td>3 · Выгрузка за период</td><td><span class="st st-part">не закончен</span></td></tr>
-              <tr class="cm"><td colspan="3">Добавила выбор периода; проверки не прошли, и сессия записала, с чего продолжить. <span class="hash">c58d0a4</span></td></tr>
+              <tr class="cm"><td colspan="3">Выбор периода добавлен, но проверки не прошли: даты сдвигаются на сутки у клиентов восточнее Москвы. С чего продолжить — в «Контексте» задачи. <span class="hash">c58d0a4</span></td></tr>
               <tr class="it"><td class="nw">4 · 14:05<br>53 мин</td><td>3 · Выгрузка за период</td><td><span class="st st-failed">сбой</span></td></tr>
-              <tr class="cm"><td colspan="3">Потеряла связь с сервисом Claude; коммитов нет.</td></tr>
+              <tr class="cm"><td colspan="3">Читаю код страницы расходов, чтобы добавить выбор периода. Коммитов нет.</td></tr>
               <tr class="it"><td class="nw">3 · 13:22<br>38 мин</td><td>2 · Кнопка выгрузки</td><td><span class="st st-done">сделано</span></td></tr>
-              <tr class="cm"><td colspan="3">Поставила кнопку «Выгрузить» на страницу расходов. <span class="hash">4c1e9a2 7d03b5f</span></td></tr>
+              <tr class="cm"><td colspan="3">Кнопка «Выгрузить» стоит на странице расходов и отдаёт файл. Шаг «Кнопка выгрузки» закрыт. <span class="hash">4c1e9a2 7d03b5f</span></td></tr>
             </tbody>
           </table>
         </div>
@@ -307,31 +273,35 @@ html:has(.zoom[open]) { overflow: hidden; }
               <tbody>
                 <tr class="day"><td colspan="3">2026-10-11</td></tr>
                 <tr class="it"><td class="nw">2 · 12:48<br>22 мин</td><td>1 · Формат файла</td><td><span class="st st-done">сделано</span></td></tr>
-                <tr class="cm"><td colspan="3">Сделала запись расходов в файл с меткой кодировки для Excel. <span class="hash">2b8e6d1 e5a0c47</span></td></tr>
+                <tr class="cm"><td colspan="3">Расходы пишутся в файл с меткой кодировки, и Excel показывает русские буквы. Шаг «Формат файла» закрыт. <span class="hash">2b8e6d1 e5a0c47</span></td></tr>
                 <tr class="it"><td class="nw">1 · 12:10<br>33 мин</td><td>1 · Формат файла</td><td><span class="st st-past">вопрос снят</span></td></tr>
-                <tr class="cm"><td colspan="3">Спросила, какая кодировка нужна, чтобы Excel показал русские буквы. <span class="hash">91af3c0</span></td></tr>
+                <tr class="cm"><td colspan="3">Шаг «Формат файла» стоит на вопросе: какая кодировка нужна, чтобы Excel на Windows показал русские буквы. Вопрос и моё предложение — в конце файла задачи. <span class="hash">91af3c0</span></td></tr>
               </tbody>
             </table>
           </div>
         </details>
-        <p class="note">Итерация 4 — сбой: сессия потеряла связь с сервисом Claude, и оркестратор перезапустил движок без вопроса. Итерация 5 не закончила шаг: сессия упёрлась в предел памяти разговора и записала, с чего продолжить. Итерация 6 этот шаг закончила. Остальные итерации дошли до конца шага или до вопроса.</p>
+        <!-- /page:its -->
+        <!-- page:its-note -->
+        <p class="note">Итерация 6 закрыла шаг «Выгрузка за период»; итерация 7 идёт на шаг «Большие выгрузки». Итерация 4 упала — сессия потеряла связь с сервисом Claude, и оркестратор перезапустил движок без вопроса.</p>
+        <!-- /page:its-note -->
       </section>
 
       <section id="qa">
         <h3>Вопросы и ответы</h3>
         <p class="note">Вопросы, на которых сессия останавливала работу, и кто ответил. Новые сверху; ответ — под вопросом.</p>
+        <!-- page:qa -->
         <details class="qa">
-          <summary><span class="meta"><span>2026-10-11 12:44 · шаг 1 · ответил оркестратор</span></span>Какая кодировка нужна, чтобы Excel на Windows показал русские буквы в файле?</summary>
-          <p><span class="kind">Ответ оркестратора</span> UTF-8 с меткой кодировки в начале файла. Без метки Excel на Windows читает файл в кодировке системы, и буквы искажаются.</p>
-          <p class="note">Источник — справка Microsoft об открытии CSV в Excel.</p>
+          <summary><span class="meta"><span>2026-10-11 12:44 · шаг «Формат файла» · ответил оркестратор</span></span>Какая кодировка нужна, чтобы Excel на Windows показал русские буквы в файле?</summary>
+          <p><span class="kind">Ответ оркестратора</span> UTF-8 с меткой кодировки в начале файла: без метки Excel на Windows читает файл в кодировке системы, и буквы искажаются. Источник — справка Microsoft об открытии CSV в Excel.</p>
         </details>
+        <!-- /page:qa -->
       </section>
 
       <details id="roles">
         <summary>Кто здесь действует</summary>
         <ul>
           <li>Движок — скрипт на компьютере пользователя: запускает сессии по шагам одну за другой и пишет журнал цикла.</li>
-          <li>Сессия — Claude в контейнере, запущенный движком на один шаг: делает шаг и записывает итог в задачу.</li>
+          <li>Сессия — Claude, запущенный движком на один шаг: делает шаг и записывает итог в задачу.</li>
           <li>Оркестратор — Claude на компьютере пользователя: следит за движком, сам отвечает на вопросы, которые снимает проверкой, остальные задаёт пользователю.</li>
           <li>Пользователь — ты: выбираешь на развилках и проверяешь сделанное.</li>
         </ul>
@@ -341,17 +311,6 @@ html:has(.zoom[open]) { overflow: hidden; }
 </div>
 
 <a class="top" href="#top">↑ Наверх</a>
-
-<dialog class="zoom" aria-label="Схема крупнее">
-  <div class="zoom-bar">
-    <button type="button" data-z="-1" aria-label="Мельче">−</button>
-    <output aria-live="polite">100 %</output>
-    <button type="button" data-z="1" aria-label="Крупнее">+</button>
-    <button type="button" class="zoom-close" autofocus>Закрыть</button>
-  </div>
-  <div class="zoom-view"></div>
-  <div class="zoom-cap"></div>
-</dialog>
 
 <script>
 // кнопка «Наверх» — после двух экранов прокрутки
@@ -367,67 +326,4 @@ const mark = () => {
 };
 addEventListener('scroll', mark, { passive: true });
 mark();
-// просмотр поверх страницы: нажатие на фигуру — её копия в слое; 100 % — фигура целиком по размеру слоя
-const dlg = document.querySelector('.zoom');
-const view = dlg.querySelector('.zoom-view');
-const cap = dlg.querySelector('.zoom-cap');
-const pct = dlg.querySelector('output');
-const [minus, plus] = dlg.querySelectorAll('[data-z]');
-const steps = [100, 150, 200, 300, 400];
-let fig, box, inner, w, h, step, pageY;
-const apply = () => {
-  // центр видимой части сохраняется при смене масштаба
-  const cx = (view.scrollLeft + view.clientWidth / 2) / view.scrollWidth;
-  const cy = (view.scrollTop + view.clientHeight / 2) / view.scrollHeight;
-  const pad = parseFloat(getComputedStyle(view).paddingTop) * 2;
-  const s = Math.min((view.clientWidth - pad) / w, (view.clientHeight - pad) / h) * steps[step] / 100;
-  box.style.width = w * s + 'px';
-  box.style.height = h * s + 'px';
-  inner.style.transform = `scale(${s})`;
-  pct.textContent = steps[step] + ' %';
-  minus.disabled = step === 0;
-  plus.disabled = step === steps.length - 1;
-  view.scrollLeft = cx * view.scrollWidth - view.clientWidth / 2;
-  view.scrollTop = cy * view.scrollHeight - view.clientHeight / 2;
-};
-const open = f => {
-  fig = f;
-  const parts = [...f.children].filter(c => c.tagName !== 'FIGCAPTION' && !c.classList.contains('zoom-btn'));
-  w = Math.max(...parts.map(c => Math.max(c.scrollWidth, c.getBoundingClientRect().width)));
-  inner = document.createElement('div');
-  inner.className = 'zoom-in';
-  inner.style.width = w + 'px';
-  parts.forEach(c => inner.append(c.cloneNode(true)));
-  box = document.createElement('div');
-  box.className = 'zoom-box';
-  box.append(inner);
-  view.replaceChildren(box);
-  cap.replaceChildren(...(f.querySelector('figcaption')?.cloneNode(true).childNodes ?? []));
-  step = 0;
-  pageY = scrollY;
-  dlg.showModal();
-  h = inner.offsetHeight;
-  apply();
-};
-document.querySelectorAll('main figure').forEach(f => {
-  const b = document.createElement('button');
-  b.type = 'button';
-  b.className = 'zoom-btn';
-  b.textContent = 'Крупнее';
-  f.prepend(b);
-  f.classList.add('zoomable');
-  f.addEventListener('click', () => open(f));
-});
-dlg.addEventListener('click', e => {
-  const b = e.target.closest('[data-z]');
-  if (b) { step = Math.min(steps.length - 1, Math.max(0, step + Number(b.dataset.z))); apply(); }
-});
-dlg.querySelector('.zoom-close').addEventListener('click', () => dlg.close());
-// закрытие кнопкой или Escape: страница на прежнем месте, фокус — на кнопке «Крупнее» той же фигуры
-dlg.addEventListener('close', () => {
-  view.replaceChildren();
-  scrollTo({ top: pageY, behavior: 'instant' });
-  fig.querySelector('.zoom-btn').focus({ preventScroll: true });
-});
-addEventListener('resize', () => { if (dlg.open) apply(); });
 </script>
