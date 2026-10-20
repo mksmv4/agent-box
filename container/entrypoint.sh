@@ -29,12 +29,12 @@ take .claude/CLAUDE.md
 take .claude/hooks
 take .gitconfig
 
-# скиллы образа: свежая копия при каждом старте, скиллы пользователя рядом остаются
+# скиллы образа: свежая копия при каждом старте, скиллы пользователя под другими именами рядом остаются.
+# Имена box-* принадлежат обвязке: копии прошлого образа уходят целиком — личный скилл берёт верх над одноимённым скиллом проекта,
+# и копия /box-task или /box-review из образа до их переезда в проект заслонила бы свежую проектную.
 $as_node mkdir -p "$home/.claude/skills"
-for s in /etc/claude-box/skills/*; do
-  rm -rf "$home/.claude/skills/${s##*/}"
-  cp -r "$s" "$home/.claude/skills/"
-done
+rm -rf "$home/.claude/skills"/box-*
+cp -r /etc/claude-box/skills/* "$home/.claude/skills/"
 chown -R node:node "$home/.claude/skills"
 
 hs=$host/.claude/settings.json

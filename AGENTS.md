@@ -4,11 +4,11 @@
 
 ## Суть проекта
 
-agent-box — обвязка проектов под работу с Claude Code (`docs/DESCRIPTION.md`). Продукт — три папки, скрипт и конфиг: образец проекта `template/`, скиллы контейнера `skills/`, образ `container/`, движок автоцикла `agent-loop.sh` и конфиг agent-box `config.yml`; их файлы правятся как код. Хаб и документы в `template/` — правила проектов, куда ляжет образец; в этом проекте они не действуют: настройка `claudeMdExcludes` в `.claude/settings.json` выключает хаб образца, `template/CLAUDE.md` и `template/AGENTS.md`, а с ним и документы, которые он подгружает. Протокол, скиллы образца, `/box-task` и `/box-review` действуют и здесь — через ссылки (§ Жёсткие ограничения). Сам репозиторий ведётся по обвязке своим каркасом в корне — `AGENTS.md`, `docs/`, `.claude/`.
+agent-box — обвязка проектов под работу с Claude Code (`docs/DESCRIPTION.md`). Продукт — три папки, скрипт и конфиг: образец проекта `template/`, скиллы контейнера `skills/`, образ `container/`, движок автоцикла `agent-loop.sh` и конфиг agent-box `config.yml`; их файлы правятся как код. Хаб и документы в `template/` — правила проектов, куда ляжет образец; в этом проекте они не действуют: настройка `claudeMdExcludes` в `.claude/settings.json` выключает хаб образца, `template/CLAUDE.md` и `template/AGENTS.md`, а с ним и документы, которые он подгружает. Протокол и скиллы образца действуют и здесь — через ссылки (§ Жёсткие ограничения). Сам репозиторий ведётся по обвязке своим каркасом в корне — `AGENTS.md`, `docs/`, `.claude/`.
 
 ## Жёсткие ограничения
 
-- Протокол и скиллы проекта в этом репозитории — ссылки на рабочие оригиналы: `docs/PROTOCOL.md`, `.claude/skills/box-next/` и `.claude/skills/box-orchestrate/` — на `template/`, `.claude/skills/box-task/` и `.claude/skills/box-review/` — на одноимённые папки `skills/`. Правка оригинала сразу действует в сессиях этого репозитория. Запись через ссылку Claude Code отклоняет и называет её цель — правится оригинал. В контейнере `/box-task` и `/box-review` — копии из образа: одноимённый личный скилл Claude Code берёт верх над скиллом проекта (code.claude.com/docs/en/skills, 2026-10-13).
+- Протокол и скиллы проекта в этом репозитории — ссылки на рабочие оригиналы: `docs/PROTOCOL.md`, `.claude/skills/box-next/`, `.claude/skills/box-orchestrate/`, `.claude/skills/box-task/` и `.claude/skills/box-review/` — на одноимённые пути в `template/`. Правка оригинала сразу действует в сессиях этого репозитория. Запись через ссылку Claude Code отклоняет и называет её цель — правится оригинал.
 - `/box-init` на этом репозитории разберёт `template/` и `skills/` как старую документацию и унесёт их в архив; каркас этого репозитория правится руками.
 - `/box-update` здесь не запускается: копию образца из образа он кладёт поверх протокола и скиллов проекта, а через ссылки она ляжет на рабочие оригиналы в `template/`. Свежесть протокола и скиллов здесь держат сами ссылки.
 
@@ -39,10 +39,10 @@ agent-box — обвязка проектов под работу с Claude Code
 - `template/docs/PROTOCOL.md` — рабочий оригинал протокола
 - `template/.claude/skills/box-next/SKILL.md` — рабочий оригинал `/box-next`
 - `template/.claude/skills/box-orchestrate/SKILL.md` — рабочий оригинал `/box-orchestrate`: сессия хоста ведёт задачу движком
+- `template/.claude/skills/box-task/SKILL.md` — рабочий оригинал `/box-task`: заведение задачи
+- `template/.claude/skills/box-review/SKILL.md` — рабочий оригинал `/box-review`: шаги ревью готовой задачи
 - `skills/box-init/SKILL.md` — `/box-init`: заведение проекта и шаблон задачи сборки документации
 - `skills/box-init/documents.md` — карточки документов проекта
-- `skills/box-task/SKILL.md` — `/box-task`: заведение задачи
-- `skills/box-review/SKILL.md` — `/box-review`: шаги ревью готовой задачи
 - `skills/box-update/SKILL.md` — `/box-update`: свежие протокол и `/box-next` в проекте
 - `agent-loop.sh` — движок автоцикла на хосте: итерации `/box-next` в контейнере проекта или на хосте
 - `box-connect` — первый запуск Claude в контейнере в папке проекта до `/box-init`; команду ставит первый `./agent-loop.sh`
