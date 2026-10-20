@@ -57,13 +57,24 @@ def git(*args):
     return subprocess.run(['git', *args], capture_output=True, text=True, check=True).stdout.strip()
 
 
-# таск-файл: статус и очередь шагов «Постановки» — (закрыт ли, короткое имя)
+# строка этапа в «Постановке» — «Этап <N> — <название>.» в начале абзаца; этап идёт с первого шага после неё
+STAGE_LINE = re.compile(r'^Этап (\d+) — ([^.\n]+)')
+
+
+# таск-файл: статус, очередь шагов «Постановки» — (закрыт ли, короткое имя) — и этапы: номер шага → [(номер этапа, строка этапа)]
 def read_task(path):
     text = path.read_text()
     status = re.match(r'статус: *(.*)', text)
     plan = re.search(r'^## Постановка$(.*?)(?=^## |\Z)', text, re.M | re.S)
-    steps = re.findall(r'^- \[([ x])\] (.*)$', plan[1] if plan else '', re.M)
-    return (status[1].strip() if status else ''), [(box == 'x', short(s)) for box, s in steps]
+    steps, stages, pending = [], {}, []
+    for line in (plan[1] if plan else '').splitlines():
+        if m := re.match(r'- \[([ x])\] (.*)$', line):
+            steps.append((m[1] == 'x', short(m[2])))
+            if pending:
+                stages[len(steps)], pending = pending, []
+        elif m := STAGE_LINE.match(line):
+            pending.append((int(m[1]), f'Этап {m[1]} — {m[2].strip()}'))
+    return (status[1].strip() if status else ''), steps, stages
 
 
 # журнал цикла: итерации задачи по всем её запускам, номер — сквозной
@@ -197,25 +208,23 @@ def table(its, ns, state, closed, now):
     return wrap(['Итерация', 'Шаг', 'Исход'], rows)
 
 
-# этапы очереди: строка этапа и пояснение под ней перед первым шагом этапа — data-from
-STAGE = re.compile(r'<tr class="stage(?:-note)?" data-from="(\d+)">')
+# этапы очереди: строка этапа и пояснение под ней перед первым шагом этапа — data-stage, номер этапа
+STAGE = re.compile(r'<tr class="stage(-note)?" data-stage="(\d+)">')
 
 
-def stage_rows(stage):
-    n = int(stage['from'])
-    rows = [f'<tr class="stage" data-from="{n}"><td colspan="3">{esc(stage["name"])}</td></tr>']
-    if stage.get('note'):
-        rows.append(f'<tr class="stage-note" data-from="{n}"><td colspan="3">{esc(stage["note"])}</td></tr>')
-    return n, rows
+def note_row(n, note):
+    return f'<tr class="stage-note" data-stage="{n}"><td colspan="3">{esc(note)}</td></tr>'
 
 
 def read_stages(page):
-    # этапы прошлой отрисовки очереди: их задаёт только new, события переносят
-    stages = {}
+    # этапы прошлой отрисовки очереди: номера и строки пояснений; пояснения задаёт только new, события переносят
+    shown, notes = set(), {}
     for line in get(page, 'steps'):
         if m := STAGE.search(line):
-            stages.setdefault(int(m[1]), []).append(line.strip())
-    return stages
+            shown.add(int(m[2]))
+            if m[1]:
+                notes[int(m[2])] = line.strip()
+    return shown, notes
 
 
 def render_its(its, state, closed, now):
@@ -251,10 +260,10 @@ def render_now(state, its, last, extra):
     return out + extra
 
 
-def render_common(page, state, task_file, log, task, now, extra, stages=None):
-    status, steps = read_task(task_file)
-    if stages is None:
-        stages = read_stages(page)
+def render_common(page, state, task_file, log, task, now, extra, notes=None):
+    status, steps, stages = read_task(task_file)
+    if notes is None:
+        notes = read_stages(page)[1]
     its, last = read_log(log, task)
     closed = sum(done for done, _ in steps)
     total = len(steps)
@@ -274,7 +283,8 @@ def render_common(page, state, task_file, log, task, now, extra, stages=None):
     rows = []
     for k, (done, name) in enumerate(steps, 1):
         mark = DONE if done else (on if name == cur and state != 'готово' else TODO)
-        rows += stages.get(k, [])
+        for n, title in stages.get(k, []):
+            rows += [f'<tr class="stage" data-stage="{n}"><td colspan="3">{esc(title)}</td></tr>', *([notes[n]] if n in notes else [])]
         rows.append(f'<tr><td class="n">{k}</td><td>{esc(name)}</td><td class="nw">{label(mark)}</td></tr>')
     page = put(page, 'meta', meta + ['</p>'])
     page = put(page, 'where', [where])
@@ -343,24 +353,29 @@ def main():
     if cmd == 'new':
         page = SKELETON.read_text()
         project = root.name
-        status, _ = read_task(task_file)
+        status = read_task(task_file)[0]
         page = put(page, 'title', [f'<title>{esc(task)} · {esc(project)}</title>'])
         page = put(page, 'name', [f'<p class="eyebrow">Задача {esc(task)} · проект «{esc(project)}»</p>', f'<h1>{esc(data["title"])}</h1>'])
         page = put(page, 'lead', [esc(' '.join(data['lead'].split()))])
         goals = [f'  <li><strong>{esc(g["name"])}.</strong> {esc(g["text"])}</li>' for g in data['goals']]
         page = put(page, 'goals', ['<ul class="goals">', *goals, '</ul>'])
-        stages = dict(stage_rows(s) for s in data.get('stages', []))
+        notes = {s['n']: note_row(s['n'], s['note']) for s in data.get('stages', []) if s.get('note')}
         page = put(page, 'its-note', [])
         # вопросы и ответы прежней страницы с метками переходят на новую
         old = file.read_text() if file.exists() else ''
         page = put(page, 'qa', get(old, 'qa') if span(old, 'qa') else [NO_QA])
-        page, _, _ = render_common(page, 'готово' if status == 'готово' else 'стоит', task_file, log, task, now, [], stages)
+        page, _, _ = render_common(page, 'готово' if status == 'готово' else 'стоит', task_file, log, task, now, [], notes)
         file.write_text(page)
         what = 'страница заведена'
     else:
         page = file.read_text() if file.exists() else ''
         if any(span(page, m) is None for m in MARKS):
             fail(3, f'{rel}: страницы нет или в ней нет меток — сначала команда new, затем эта команда снова')
+        # этап, появившийся в таск-файле после new, — пояснение к нему пишет оркестратор командой new
+        shown = read_stages(page)[0]
+        fresh = [str(n) for v in read_task(task_file)[2].values() for n, _ in v if n not in shown]
+        if fresh:
+            fail(3, f'{rel}: на странице нет этапа таск-файла {", ".join(fresh)} — сначала команда new, затем эта команда снова')
         before = page
         state = STATE[cmd]
         extra = paras(text) if cmd in ('stop', 'done') else []
