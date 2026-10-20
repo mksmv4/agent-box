@@ -64,7 +64,7 @@ body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 var(--
 /* поле под колонкой текста в экран: переход по оглавлению ставит у верха и последний раздел, оглавление остаётся на месте */
 .body { padding-bottom: calc(100vh - 48px); }
 .head { gap: 10px; }
-section, .part { display: grid; gap: 10px; min-width: 0; scroll-margin-top: 16px; }
+section { display: grid; gap: 10px; min-width: 0; scroll-margin-top: 16px; }
 @media (min-width: 64rem) {
   .page { max-width: 64rem; grid-template-columns: 13rem minmax(0, 46rem); grid-template-areas: "toc head" "toc body"; column-gap: 48px; align-items: start; }
   .head { grid-area: head; }
@@ -77,6 +77,7 @@ h3 { font-size: .9375rem; margin: 6px 0 0; }
 h4 { font-size: .9375rem; margin: 0; }
 p, ul, ol, dl { margin: 0; }
 ul, ol { padding-left: 1.25rem; display: grid; gap: 4px; }
+.goals { gap: 8px; }
 a { color: inherit; text-decoration-thickness: 1px; text-underline-offset: 2px; }
 a:focus-visible, summary:focus-visible, button:focus-visible { outline: 2px solid var(--fg); outline-offset: 3px; border-radius: 4px; }
 .eyebrow { color: var(--muted); font-size: .8125rem; }
@@ -127,6 +128,10 @@ tr.day td { padding-top: 14px; font-weight: 600; }
 tr.it td { border-bottom: 0; padding-bottom: 2px; }
 tr.cm td { padding-top: 0; color: var(--muted); }
 td.nw { white-space: nowrap; }
+td.n { white-space: nowrap; color: var(--muted); }
+/* этап очереди шагов: строка во всю ширину и бледное пояснение под ней */
+tr.stage td { padding-top: 18px; border-bottom: 0; padding-bottom: 2px; font-weight: 600; }
+tr.stage-note td { padding-top: 0; color: var(--muted); }
 .hash { font-family: var(--mono); font-size: .8125rem; }
 details { border-top: 1px solid var(--line); padding-top: 10px; display: grid; gap: 8px; scroll-margin-top: 16px; }
 summary { cursor: pointer; font-weight: 600; }
@@ -164,7 +169,7 @@ details[open] > summary { margin-bottom: 4px; }
       <!-- page:toc-ask -->
       <li><a href="#ask">Ждёт решения</a></li>
       <!-- /page:toc-ask -->
-      <li><a href="#goal">Цель и шаги</a></li>
+      <li><a href="#goal">Цели и шаги</a></li>
       <li><a href="#now">Сейчас</a></li>
       <li class="sep">История</li>
       <li><a href="#its">Итерации</a></li>
@@ -202,31 +207,33 @@ details[open] > summary { margin-bottom: 4px; }
     <!-- /page:ask -->
 
     <section id="goal">
-      <h2>Цель и шаги</h2>
-      <p class="note">Цель по частям и шаги, которые к ней ведут.</p>
-      <!-- page:parts -->
-      <div class="part" id="part1">
-        <h3>Часть 1 — файл для таблиц</h3>
-        <p>Клиент открывает файл в Excel или Google Таблицах, и русские буквы видны без настройки. Кнопка «Выгрузить» стоит на странице расходов.</p>
-      </div>
-      <div class="part" id="part2">
-        <h3>Часть 2 — любой период</h3>
-        <p>Клиент выбирает период, от дня до нескольких лет, и получает свои расходы за него. Даты считаются по часовому поясу клиента.</p>
-      </div>
-      <div class="part" id="part3">
-        <h3>Часть 3 — телефон и компьютер</h3>
-        <p>На телефоне выгрузка работает так же, как на компьютере: кнопка видна, файл скачивается.</p>
-      </div>
-      <!-- /page:parts -->
+      <h2>Цели и шаги</h2>
+      <h3>Цели</h3>
+      <!-- page:goals -->
+      <ul class="goals">
+        <li><strong>Файл для таблиц.</strong> Клиент открывает файл в Excel или Google Таблицах, и русские буквы видны без настройки. Кнопка «Выгрузить» стоит на странице расходов.</li>
+        <li><strong>Любой период.</strong> Клиент выбирает период, от дня до нескольких лет, и получает свои расходы за него. Даты считаются по часовому поясу клиента.</li>
+        <li><strong>Телефон и компьютер.</strong> На телефоне выгрузка работает так же, как на компьютере: кнопка видна, файл скачивается.</li>
+      </ul>
+      <!-- /page:goals -->
       <h3>Очередь шагов</h3>
       <!-- page:steps -->
-      <ol>
-        <li>Формат файла <span class="st st-done">сделано</span></li>
-        <li>Кнопка выгрузки <span class="st st-done">сделано</span></li>
-        <li>Выгрузка за период <span class="st st-done">сделано</span></li>
-        <li>Большие выгрузки <span class="st st-wait">ждёт решения</span></li>
-        <li>Проверка на телефоне <span class="st st-todo">впереди</span></li>
-      </ol>
+      <div class="scroll">
+        <table>
+          <thead><tr><th>№</th><th>Шаг</th><th>Состояние</th></tr></thead>
+          <tbody>
+            <tr class="stage" data-from="1"><td colspan="3">Этап 1 — выгрузка в таблицы</td></tr>
+            <tr class="stage-note" data-from="1"><td colspan="3">Каждый шаг добавляет выгрузке одну возможность и проверяет её тестом.</td></tr>
+            <tr><td class="n">1</td><td>Формат файла</td><td class="nw"><span class="st st-done">сделано</span></td></tr>
+            <tr><td class="n">2</td><td>Кнопка выгрузки</td><td class="nw"><span class="st st-done">сделано</span></td></tr>
+            <tr><td class="n">3</td><td>Выгрузка за период</td><td class="nw"><span class="st st-done">сделано</span></td></tr>
+            <tr class="stage" data-from="4"><td colspan="3">Этап 2 — большие файлы и телефон</td></tr>
+            <tr class="stage-note" data-from="4"><td colspan="3">Шаги проверяют выгрузку за долгий период и на телефоне.</td></tr>
+            <tr><td class="n">4</td><td>Большие выгрузки</td><td class="nw"><span class="st st-wait">ждёт решения</span></td></tr>
+            <tr><td class="n">5</td><td>Проверка на телефоне</td><td class="nw"><span class="st st-todo">впереди</span></td></tr>
+          </tbody>
+        </table>
+      </div>
       <!-- /page:steps -->
     </section>
 

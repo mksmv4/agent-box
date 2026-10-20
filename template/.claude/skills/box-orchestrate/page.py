@@ -12,7 +12,7 @@ from datetime import datetime
 from pathlib import Path
 
 SKELETON = Path(__file__).resolve().parent / 'examples' / 'running.html'
-MARKS = ['title', 'name', 'meta', 'lead', 'where', 'updated', 'toc-ask', 'ask', 'parts', 'steps', 'now', 'its', 'its-note', 'qa']
+MARKS = ['title', 'name', 'meta', 'lead', 'where', 'updated', 'toc-ask', 'ask', 'goals', 'steps', 'now', 'its', 'its-note', 'qa']
 NO_QA = '<p class="note">Вопросов пока не было.</p>'
 # состояние страницы по команде; new берёт его из статуса задачи
 STATE = {'iteration': 'идёт', 'question': 'ждёт решения', 'answer': 'стоит', 'stop': 'стоит', 'done': 'готово'}
@@ -181,6 +181,12 @@ def iteration_rows(its, n, state, closed, now):
             f'<tr class="cm"><td colspan="3">{text}</td></tr>']
 
 
+def wrap(head, rows):
+    # таблица в контейнере прокрутки: на телефоне шире экрана — прокрутка внутри
+    return ['<div class="scroll">', '  <table>', '    <thead><tr>' + ''.join(f'<th>{h}</th>' for h in head) + '</tr></thead>',
+            '    <tbody>', *('      ' + r for r in rows), '    </tbody>', '  </table>', '</div>']
+
+
 def table(its, ns, state, closed, now):
     rows, day = [], None
     for n in ns:
@@ -188,8 +194,28 @@ def table(its, ns, state, closed, now):
             day = its[n]['at'][:10]
             rows.append(f'<tr class="day"><td colspan="3">{day}</td></tr>')
         rows += iteration_rows(its, n, state, closed, now)
-    return ['<div class="scroll">', '  <table>', '    <thead><tr><th>Итерация</th><th>Шаг</th><th>Исход</th></tr></thead>',
-            '    <tbody>', *('      ' + r for r in rows), '    </tbody>', '  </table>', '</div>']
+    return wrap(['Итерация', 'Шаг', 'Исход'], rows)
+
+
+# этапы очереди: строка этапа и пояснение под ней перед первым шагом этапа — data-from
+STAGE = re.compile(r'<tr class="stage(?:-note)?" data-from="(\d+)">')
+
+
+def stage_rows(stage):
+    n = int(stage['from'])
+    rows = [f'<tr class="stage" data-from="{n}"><td colspan="3">{esc(stage["name"])}</td></tr>']
+    if stage.get('note'):
+        rows.append(f'<tr class="stage-note" data-from="{n}"><td colspan="3">{esc(stage["note"])}</td></tr>')
+    return n, rows
+
+
+def read_stages(page):
+    # этапы прошлой отрисовки очереди: их задаёт только new, события переносят
+    stages = {}
+    for line in get(page, 'steps'):
+        if m := STAGE.search(line):
+            stages.setdefault(int(m[1]), []).append(line.strip())
+    return stages
 
 
 def render_its(its, state, closed, now):
@@ -225,8 +251,10 @@ def render_now(state, its, last, extra):
     return out + extra
 
 
-def render_common(page, state, task_file, log, task, now, extra):
+def render_common(page, state, task_file, log, task, now, extra, stages=None):
     status, steps = read_task(task_file)
+    if stages is None:
+        stages = read_stages(page)
     its, last = read_log(log, task)
     closed = sum(done for done, _ in steps)
     total = len(steps)
@@ -243,15 +271,15 @@ def render_common(page, state, task_file, log, task, now, extra):
         'стоит': f'Шагов сделано — {closed} из {total}, движок стоит — <a href="#now">раздел «Сейчас»</a>.',
         'готово': 'Все шаги сделаны, задача готова — <a href="#now">раздел «Сейчас»</a>.',
     }[state]
-    queue = ['<ol>']
-    for done, name in steps:
+    rows = []
+    for k, (done, name) in enumerate(steps, 1):
         mark = DONE if done else (on if name == cur and state != 'готово' else TODO)
-        queue.append(f'  <li>{esc(name)} {label(mark)}</li>')
-    queue.append('</ol>')
+        rows += stages.get(k, [])
+        rows.append(f'<tr><td class="n">{k}</td><td>{esc(name)}</td><td class="nw">{label(mark)}</td></tr>')
     page = put(page, 'meta', meta + ['</p>'])
     page = put(page, 'where', [where])
     page = put(page, 'updated', [f'<p class="note">Обновлено {now:%Y-%m-%d %H:%M} по задаче и журналу цикла.</p>'])
-    page = put(page, 'steps', queue)
+    page = put(page, 'steps', wrap(['№', 'Шаг', 'Состояние'], rows))
     page = put(page, 'now', render_now(state, its, last, extra))
     page = put(page, 'its', render_its(its, state, closed, now))
     if state != 'ждёт решения':
@@ -319,13 +347,14 @@ def main():
         page = put(page, 'title', [f'<title>{esc(task)} · {esc(project)}</title>'])
         page = put(page, 'name', [f'<p class="eyebrow">Задача {esc(task)} · проект «{esc(project)}»</p>', f'<h1>{esc(data["title"])}</h1>'])
         page = put(page, 'lead', [esc(' '.join(data['lead'].split()))])
-        parts = []
-        for i, p in enumerate(data['parts'], 1):
-            parts += [f'<div class="part" id="part{i}">', f'  <h3>Часть {i} — {esc(p["name"])}</h3>', f'  <p>{esc(p["text"])}</p>', '</div>']
-        page = put(page, 'parts', parts)
+        goals = [f'  <li><strong>{esc(g["name"])}.</strong> {esc(g["text"])}</li>' for g in data['goals']]
+        page = put(page, 'goals', ['<ul class="goals">', *goals, '</ul>'])
+        stages = dict(stage_rows(s) for s in data.get('stages', []))
         page = put(page, 'its-note', [])
-        page = put(page, 'qa', [NO_QA])
-        page, _, _ = render_common(page, 'готово' if status == 'готово' else 'стоит', task_file, log, task, now, [])
+        # вопросы и ответы прежней страницы с метками переходят на новую
+        old = file.read_text() if file.exists() else ''
+        page = put(page, 'qa', get(old, 'qa') if span(old, 'qa') else [NO_QA])
+        page, _, _ = render_common(page, 'готово' if status == 'готово' else 'стоит', task_file, log, task, now, [], stages)
         file.write_text(page)
         what = 'страница заведена'
     else:
