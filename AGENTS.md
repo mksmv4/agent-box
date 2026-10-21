@@ -41,6 +41,7 @@ agent-box — обвязка проектов под работу с Claude Code
 - `template/.claude/skills/box-orchestrate/SKILL.md` — рабочий оригинал `/box-orchestrate`: сессия хоста ведёт задачу движком
 - `template/.claude/skills/box-task/SKILL.md` — рабочий оригинал `/box-task`: заведение задачи
 - `template/.claude/skills/box-review/SKILL.md` — рабочий оригинал `/box-review`: шаги ревью готовой задачи
+- `template/.claude/skills/box-qa/SKILL.md` — рабочий оригинал `/box-qa`: сценарии QA готовой задачи и этап их прогона на хосте
 - `skills/box-init/SKILL.md` — `/box-init`: заведение проекта и шаблон задачи сборки документации
 - `skills/box-init/documents.md` — карточки документов проекта
 - `skills/box-update/SKILL.md` — `/box-update`: свежие протокол и `/box-next` в проекте
