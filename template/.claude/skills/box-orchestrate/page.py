@@ -3,8 +3,10 @@
 # всё вне меток — каркас примера examples/running.html. Данные — таск-файл, журнал цикла и текст оркестратора со stdin.
 # Вызов из корня проекта: python3 .claude/skills/box-orchestrate/page.py <задача> <команда> [адрес] <<'EOF' … EOF
 # Команды и форма текста — SKILL.md рядом, шаг «Страница задачи»; устройство страницы и метки — pages.md.
+import base64
 import html
 import json
+import mimetypes
 import re
 import subprocess
 import sys
@@ -298,7 +300,24 @@ def render_common(page, state, task_file, log, task, now, extra, notes=None):
     return page, cur, status
 
 
-def render_ask(data):
+def look(q, root):
+    # то, из чего выбирают, как его увидит читатель: текст на проверку и картинки внутри страницы адресом data:
+    out = []
+    if q.get('quote'):
+        out += ['  <blockquote>', *('    ' + p for p in paras(q['quote'])), '  </blockquote>']
+    for im in q.get('images', []):
+        path = root / im['path']
+        kind = mimetypes.guess_type(path.name)[0]
+        if not path.is_file() or not (kind or '').startswith('image/'):
+            fail(2, f'картинка вопроса {im["path"]}: нет такого файла картинки от корня проекта')
+        src = f'data:{kind};base64,{base64.b64encode(path.read_bytes()).decode()}'
+        # размер картинки — в атрибуте: страница, заведённая до стилей .look, держит старый каркас до new
+        out += ['  <figure>', f'    <img src="{src}" alt="{esc(im["caption"])}" style="max-width: 100%; height: auto">',
+                f'    <figcaption class="note">{esc(im["caption"])}</figcaption>', '  </figure>']
+    return ['<p class="kind">Как это выглядит</p>', '<div class="look">', *out, '</div>'] if out else []
+
+
+def render_ask(data, root):
     qs = data['questions']
     many = len(qs) > 1
     top = ['<div class="ask-top">', '  <h2>Ждёт решения</h2>']
@@ -312,7 +331,7 @@ def render_ask(data):
         if many:
             body.append(f'  <h3>Вопрос {q.get("n", i)}</h3>')
         body += ['  <p class="kind">Что происходит</p>', *('  ' + p for p in paras(q['about'])),
-                 '  <p class="kind">Варианты</p>', f'  <div class="opts" id="opts-{i}">']
+                 *('  ' + s for s in look(q, root)), '  <p class="kind">Варианты</p>', f'  <div class="opts" id="opts-{i}">']
         for letter, o in zip(LETTERS, q['options']):
             body += [f'    <div class="opt" id="opt-{i}-{letter}">', f'      <h4>{esc(o["title"])}</h4>',
                      f'      <p>{esc(o["text"])}</p>', '    </div>']
@@ -386,7 +405,7 @@ def main():
             page = put(page, 'its-note', [f'<p class="note">{esc(" ".join(text.split()))}</p>'])
         if cmd == 'question':
             page = put(page, 'toc-ask', ['<li><a href="#ask">Ждёт решения</a></li>'])
-            page = put(page, 'ask', render_ask(data))
+            page = put(page, 'ask', render_ask(data, root))
         if cmd == 'answer':
             items = []
             for a in data:
