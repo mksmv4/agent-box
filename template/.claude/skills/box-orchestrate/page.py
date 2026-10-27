@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 # Скрипт страницы задачи оркестратора: правит файл my_local/pages/<задача>.html по меткам <!-- page:имя --> … <!-- /page:имя -->,
-# всё вне меток — каркас примера examples/running.html. Данные — таск-файл, журнал цикла и текст оркестратора со stdin.
+# всё вне меток — каркас примера examples/running.html; картинки вопроса — копиями в my_local/pages/<задача>/.
+# Данные — таск-файл, журнал цикла и текст оркестратора со stdin.
 # Вызов из корня проекта: python3 .claude/skills/box-orchestrate/page.py <задача> <команда> [адрес] <<'EOF' … EOF
-# Команды и форма текста — SKILL.md рядом, шаг «Страница задачи»; устройство страницы и метки — pages.md.
-import base64
+# Команды и форма текста — SKILL.md рядом, шаг «Страница задачи», текст question — questions.md; устройство страницы и метки — pages.md.
+import hashlib
 import html
 import json
 import mimetypes
@@ -300,24 +301,31 @@ def render_common(page, state, task_file, log, task, now, extra, notes=None):
     return page, cur, status
 
 
-def look(q, root):
-    # то, из чего выбирают, как его увидит читатель: текст на проверку и картинки внутри страницы адресом data:
+def look(q, root, store, copies, lost):
+    # то, из чего выбирают, как его увидит читатель: текст на проверку и картинки файлами рядом со страницей
     out = []
     if q.get('quote'):
         out += ['  <blockquote>', *('    ' + p for p in paras(q['quote'])), '  </blockquote>']
     for im in q.get('images', []):
-        path = root / im['path']
+        # файл картинки — только внутри папки проекта: путь называет блокер, а страница уходит на claude.ai;
+        # картинка без файла в папке проекта пропускается — вопрос уходит на страницу без неё, путь называет ответ скрипта
+        path = (root / im['path']).resolve()
         kind = mimetypes.guess_type(path.name)[0]
-        if not path.is_file() or not (kind or '').startswith('image/'):
-            fail(2, f'картинка вопроса {im["path"]}: нет такого файла картинки от корня проекта')
-        src = f'data:{kind};base64,{base64.b64encode(path.read_bytes()).decode()}'
+        if not path.is_relative_to(root.resolve()) or not path.is_file() or not (kind or '').startswith('image/'):
+            lost.append(im['path'])
+            continue
+        # копия — с именем по содержимому: та же картинка — тот же файл, новая — новый адрес
+        body = path.read_bytes()
+        copy = store / (hashlib.sha1(body).hexdigest()[:12] + path.suffix.lower())
+        copies[copy] = body
+        src = f'{store.name}/{copy.name}'
         # размер картинки — в атрибуте: страница, заведённая до стилей .look, держит старый каркас до new
-        out += ['  <figure>', f'    <img src="{src}" alt="{esc(im["caption"])}" style="max-width: 100%; height: auto">',
+        out += ['  <figure>', f'    <img src="{html.escape(src)}" alt="{html.escape(im["caption"])}" style="max-width: 100%; height: auto">',
                 f'    <figcaption class="note">{esc(im["caption"])}</figcaption>', '  </figure>']
     return ['<p class="kind">Как это выглядит</p>', '<div class="look">', *out, '</div>'] if out else []
 
 
-def render_ask(data, root):
+def render_ask(data, root, store, copies, lost):
     qs = data['questions']
     many = len(qs) > 1
     top = ['<div class="ask-top">', '  <h2>Ждёт решения</h2>']
@@ -331,7 +339,7 @@ def render_ask(data, root):
         if many:
             body.append(f'  <h3>Вопрос {q.get("n", i)}</h3>')
         body += ['  <p class="kind">Что происходит</p>', *('  ' + p for p in paras(q['about'])),
-                 *('  ' + s for s in look(q, root)), '  <p class="kind">Варианты</p>', f'  <div class="opts" id="opts-{i}">']
+                 *('  ' + s for s in look(q, root, store, copies, lost)), '  <p class="kind">Варианты</p>', f'  <div class="opts" id="opts-{i}">']
         for letter, o in zip(LETTERS, q['options']):
             body += [f'    <div class="opt" id="opt-{i}-{letter}">', f'      <h4>{esc(o["title"])}</h4>',
                      f'      <p>{esc(o["text"])}</p>', '    </div>']
@@ -368,6 +376,7 @@ def main():
     except json.JSONDecodeError as e:
         fail(2, f'текст команды {cmd} — не JSON: {e}')
     now = datetime.now()
+    copies, uploads, lost = {}, {}, []
 
     if cmd == 'new':
         page = SKELETON.read_text()
@@ -405,7 +414,7 @@ def main():
             page = put(page, 'its-note', [f'<p class="note">{esc(" ".join(text.split()))}</p>'])
         if cmd == 'question':
             page = put(page, 'toc-ask', ['<li><a href="#ask">Ждёт решения</a></li>'])
-            page = put(page, 'ask', render_ask(data, root))
+            page = put(page, 'ask', render_ask(data, root, pages / task, copies, lost))
         if cmd == 'answer':
             items = []
             for a in data:
@@ -415,11 +424,28 @@ def main():
                           f'  <p><span class="kind">Ответ {who}</span> {esc(a["a"])}</p>', '</details>']
             old = get(page, 'qa')
             page = put(page, 'qa', items + ([] if old == [NO_QA] else old))
+        # копии картинок — после разбора всего текста: ошибка в нём оставляет страницу и папку картинок прежними;
+        # в ответ скрипта — все картинки вопроса: их несёт каждая публикация вопроса, и до страницы доходят
+        # картинки сорвавшейся публикации и картинки, оставшиеся на прежнем адресе страницы
+        for copy, body in copies.items():
+            if not copy.exists():
+                copy.parent.mkdir(exist_ok=True)
+                copy.write_bytes(body)
+            uploads[f'{copy.parent.name}/{copy.name}'] = str(copy.relative_to(root))
         file.write_text(page)
         changed = [m for m in MARKS if page[slice(*span(page, m)[:2])] != before[slice(*span(before, m)[:2])]]
         what = 'изменено: ' + ', '.join(changed) if changed else 'без изменений'
     url = next((s[len(mine):] for s in known if s.startswith(mine)), None)
-    print(f'{rel}: {what}; ' + (f'адрес — {url}' if url else 'адреса нет — первая публикация'))
+    files = f'картинки — в files публикации: {json.dumps(uploads, ensure_ascii=False)}; ' if uploads else ''
+    if lost:
+        files += f'вопрос на странице без картинок — нет такого файла картинки в папке проекта: {", ".join(lost)}; '
+    print(f'{rel}: {what}; {files}' + (f'адрес — {url}' if url else 'адреса нет — первая публикация'))
 
 
-main()
+# текст оркестратора без нужного поля или с полем не того вида — ошибка вызова, файл страницы остаётся прежним
+try:
+    main()
+except KeyError as e:
+    fail(2, f'текст команды {sys.argv[2]}: нет поля {e}')
+except (TypeError, AttributeError) as e:
+    fail(2, f'текст команды {sys.argv[2]}: поле не того вида — {e}')
