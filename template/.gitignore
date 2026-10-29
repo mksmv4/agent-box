@@ -1,3 +1,4 @@
 my_local/
 # сервис Claude в контейнере: пути и адреса этой машины
 /claude-box.yml
+__pycache__
