@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Скрипт страницы задачи оркестратора: правит файл my_local/pages/<задача>.html по меткам <!-- page:имя --> … <!-- /page:имя -->,
-# всё вне меток — каркас примера examples/running.html; картинки вопроса — копиями в my_local/pages/<задача>/.
-# Данные — таск-файл, журнал цикла и текст оркестратора со stdin.
+# всё вне меток — каркас примера examples/running.html; картинки вопроса и кадры прогона в браузере — копиями в my_local/pages/<задача>/.
+# Данные — таск-файл, журнал цикла, сценарии QA с их снимками экрана и текст оркестратора со stdin.
 # Вызов из корня проекта: python3 .claude/skills/box-orchestrate/page.py <задача> <команда> [адрес] <<'EOF' … EOF
 # Команды и форма текста — SKILL.md рядом, шаг «Страница задачи», текст question — questions.md; устройство страницы и метки — pages.md.
 import hashlib
@@ -9,13 +9,15 @@ import html
 import json
 import mimetypes
 import re
+import shutil
 import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
 
 SKELETON = Path(__file__).resolve().parent / 'examples' / 'running.html'
-MARKS = ['title', 'name', 'meta', 'lead', 'where', 'updated', 'toc-ask', 'ask', 'goals', 'steps', 'now', 'its', 'its-note', 'qa']
+MARKS = ['title', 'name', 'meta', 'lead', 'where', 'updated', 'toc-ask', 'ask', 'goals', 'steps', 'now', 'toc-browser', 'browser',
+         'its', 'its-note', 'qa']
 NO_QA = '<p class="note">Вопросов пока не было.</p>'
 # состояние страницы по команде; new берёт его из статуса задачи
 STATE = {'iteration': 'идёт', 'question': 'ждёт решения', 'answer': 'стоит', 'stop': 'стоит', 'done': 'готово'}
@@ -23,6 +25,7 @@ STATE = {'iteration': 'идёт', 'question': 'ждёт решения', 'answer
 RUN, WAIT, STAND = ('идёт', 'st-run'), ('ждёт решения', 'st-wait'), ('стоит', 'st-part')
 FAIL, FAILED, PART = ('сбой', 'st-fail'), ('сбой', 'st-failed'), ('не закончен', 'st-part')
 DONE, READY, PAST, TODO = ('сделано', 'st-done'), ('готово', 'st-done'), ('вопрос снят', 'st-past'), ('впереди', 'st-todo')
+PASSED, MISSED = ('прошёл', 'st-done'), ('не прошёл', 'st-failed')
 COUNT = {2: 'двух', 3: 'трёх', 4: 'четырёх'}
 LETTERS = 'abcd'
 ENGINE = 'движок — скрипт, который запускает Claude на шаги по очереди, —'
@@ -263,7 +266,65 @@ def render_now(state, its, last, extra):
     return out + extra
 
 
-def render_common(page, state, task_file, log, task, now, extra, notes=None):
+# сценарий QA — раздел «## <номер>. <название>» со строками «Из задачи:» или «Вне задачи», «Действия:», «Ожидается:», «Итог:»
+SCENARIO = re.compile(r'^## (\d+)\. ([^\n]+)\n(.*?)(?=^## |\Z)', re.M | re.S)
+FIELD = re.compile(r'^(Действия|Ожидается|Итог):[ \t]*(.*)$', re.M)
+# снимок экрана прогона в my_local/qa/<задача>/ — <заход QA>-<сценарий>-<кадр>.<формат>
+SHOT = re.compile(r'^(\d+)-(\d+)-(\d+)\.(png|jpe?g|webp)$', re.I)
+
+
+def plain(s):
+    return esc(s.replace('**', '').replace('`', '').strip())
+
+
+def render_browser(root, task, stages, store, frames):
+    # «Проверка в браузере»: сценарии QA с итогом и кадрами последнего захода; файла сценариев нет — раздела нет
+    scen = root / 'docs' / 'qa' / f'{task}.md'
+    if not scen.exists():
+        return [], []
+    # заход — номер из последней строки этапа «QA <K>» таск-файла: кадры прошлых заходов остаются только в папке снимков
+    rounds = [int(m[1]) for v in stages.values() for _, title in v if (m := re.search(r'QA (\d+)$', title))]
+    folder, shots = root / 'my_local' / 'qa' / task, {}
+    if rounds and folder.is_dir():
+        for f in folder.iterdir():
+            if (m := SHOT.match(f.name)) and int(m[1]) == rounds[-1]:
+                shots.setdefault(int(m[2]), []).append((int(m[3]), f))
+    items, tally = [], {PASSED: 0, MISSED: 0, TODO: 0}
+    for m in SCENARIO.finditer(scen.read_text()):
+        n, f = int(m[1]), dict(FIELD.findall(m[3]))
+        result = f.get('Итог', '').strip()
+        st = PASSED if result.startswith('прошёл') else MISSED if result.startswith('не прошёл') else TODO
+        tally[st] += 1
+        src = []
+        for _, shot in sorted(shots.get(n, [])):
+            copy = store / f'qa-{shot.name}'
+            frames[copy] = shot
+            src.append(html.escape(f'{store.name}/{copy.name}'))
+        # обложка — последний кадр сценария, нажатие открывает все кадры по порядку
+        k = len(src)
+        cover = (f'<figure class="shot"><img src="{src[-1]}" data-show="{" ".join(src)}" alt="Сценарий {n}: последний из {k} '
+                 f'{plural(k, "кадра", "кадров", "кадров")}" loading="lazy"><figcaption class="note">{k} '
+                 f'{plural(k, "кадр", "кадра", "кадров")}</figcaption></figure>') if src else '<p class="note shot">Кадров нет</p>'
+        text = [f'<h3>{n}. {plain(m[2])} {label(st)}</h3>']
+        if re.search(r'^Вне задачи', m[3], re.M):
+            text.append('<p class="note">Вне задачи: то, чего задача не обещала, — пользователь может так сломать приложение.</p>')
+        if f.get('Действия'):
+            text.append(f'<p class="note">Действия: {plain(f["Действия"])}</p>')
+        if f.get('Ожидается'):
+            text.append(f'<p>Ожидается: {plain(f["Ожидается"])}</p>')
+        if st == MISSED:
+            text.append(f'<p>Итог: {plain(result)}</p>')
+        items += ['  <div class="sc">', f'    {cover}', '    <div>', *('      ' + s for s in text), '    </div>', '  </div>']
+    total = sum(tally.values())
+    head = ['<p class="note">Сессия проходит сценарии в приложении так, как прошёл бы пользователь, и снимает экран после каждого действия. '
+            'Нажми на снимок — кадры сценария листаются по порядку.</p>',
+            f'<p>Прошли — {tally[PASSED]}, не прошли — {tally[MISSED]}, впереди — {tally[TODO]} из {total} '
+            f'{plural(total, "сценария", "сценариев", "сценариев")}.</p>']
+    return (['<li><a href="#browser">Проверка в браузере</a></li>'],
+            ['<section id="browser">', '  <h2>Проверка в браузере</h2>', *('  ' + s for s in head), *items, '</section>'])
+
+
+def render_common(page, state, task_file, log, task, now, extra, root, store, frames, notes=None):
     status, steps, stages = read_task(task_file)
     if notes is None:
         notes = read_stages(page)[1]
@@ -295,6 +356,9 @@ def render_common(page, state, task_file, log, task, now, extra, notes=None):
     page = put(page, 'steps', wrap(['№', 'Шаг', 'Состояние'], rows))
     page = put(page, 'now', render_now(state, its, last, extra))
     page = put(page, 'its', render_its(its, state, closed, now))
+    toc, browser = render_browser(root, task, stages, store, frames)
+    page = put(page, 'toc-browser', toc)
+    page = put(page, 'browser', browser)
     if state != 'ждёт решения':
         page = put(page, 'toc-ask', [])
         page = put(page, 'ask', [])
@@ -348,8 +412,8 @@ def render_ask(data, root, store, copies, lost):
 
 
 def main():
-    if len(sys.argv) < 3 or sys.argv[2] not in [*STATE, 'new', 'link']:
-        fail(2, 'вызов: page.py <задача> new|iteration|question|answer|stop|done|link [адрес], текст — со stdin')
+    if len(sys.argv) < 3 or sys.argv[2] not in [*STATE, 'new', 'link', 'sent']:
+        fail(2, 'вызов: page.py <задача> new|iteration|question|answer|stop|done|link [адрес]|sent, текст — со stdin')
     task, cmd = sys.argv[1], sys.argv[2]
     root = Path(git('rev-parse', '--show-toplevel'))
     log = Path(git('rev-parse', '--absolute-git-dir')) / 'agent-loop.log'
@@ -362,12 +426,28 @@ def main():
     pages.mkdir(parents=True, exist_ok=True)
     known = links.read_text().splitlines() if links.exists() else []
     mine = f'- {task} — '
+    url = next((s[len(mine):] for s in known if s.startswith(mine)), None)
+    # кадры прогона, которые уже дошли до страницы: их отмечает команда sent после удачной публикации
+    ledger = pages / task / 'sent.txt'
+    sent = set(ledger.read_text().split()) if ledger.exists() else set()
 
     if cmd == 'link':
         if len(sys.argv) < 4:
             fail(2, 'вызов: page.py <задача> link <адрес>')
         links.write_text('\n'.join([s for s in known if not s.startswith(mine)] + [mine + sys.argv[3]]) + '\n')
-        print(f'{links.relative_to(root)}: адрес задачи {task} — {sys.argv[3]}')
+        # новый адрес — новая страница без файлов прежней: отметки кадров снимаются, их несёт следующая публикация
+        reset = bool(url and url != sys.argv[3] and sent)
+        if reset:
+            ledger.write_text('')
+        print(f'{links.relative_to(root)}: адрес задачи {task} — {sys.argv[3]}' + ('; кадры прогона — со следующей публикацией' if reset else ''))
+        return
+
+    if cmd == 'sent':
+        page = file.read_text() if file.exists() else ''
+        shown = set(re.findall(rf'{re.escape(html.escape(task))}/qa-[^"\s]+', page))
+        ledger.parent.mkdir(exist_ok=True)
+        ledger.write_text(''.join(f'{s}\n' for s in sorted(sent | shown)))
+        print(f'{ledger.relative_to(root)}: кадры прогона на странице отмечены отправленными — {len(shown)}')
         return
 
     text = sys.stdin.read() if not sys.stdin.isatty() else ''
@@ -376,7 +456,7 @@ def main():
     except json.JSONDecodeError as e:
         fail(2, f'текст команды {cmd} — не JSON: {e}')
     now = datetime.now()
-    copies, uploads, lost = {}, {}, []
+    copies, uploads, lost, frames = {}, {}, [], {}
 
     if cmd == 'new':
         page = SKELETON.read_text()
@@ -392,7 +472,8 @@ def main():
         # вопросы и ответы прежней страницы с метками переходят на новую
         old = file.read_text() if file.exists() else ''
         page = put(page, 'qa', get(old, 'qa') if span(old, 'qa') else [NO_QA])
-        page, _, _ = render_common(page, 'готово' if status == 'готово' else 'стоит', task_file, log, task, now, [], notes)
+        page, _, _ = render_common(page, 'готово' if status == 'готово' else 'стоит', task_file, log, task, now, [],
+                                   root, pages / task, frames, notes)
         file.write_text(page)
         what = 'страница заведена'
     else:
@@ -409,7 +490,7 @@ def main():
         extra = paras(text) if cmd in ('stop', 'done') else []
         if cmd == 'answer':
             extra = ['<p>Ответ получен — он в разделе <a href="#qa">«Вопросы и ответы»</a>.</p>']
-        page, cur, _ = render_common(page, state, task_file, log, task, now, extra)
+        page, cur, _ = render_common(page, state, task_file, log, task, now, extra, root, pages / task, frames)
         if cmd == 'iteration' and text.strip():
             page = put(page, 'its-note', [f'<p class="note">{esc(" ".join(text.split()))}</p>'])
         if cmd == 'question':
@@ -435,8 +516,18 @@ def main():
         file.write_text(page)
         changed = [m for m in MARKS if page[slice(*span(page, m)[:2])] != before[slice(*span(before, m)[:2])]]
         what = 'изменено: ' + ', '.join(changed) if changed else 'без изменений'
-    url = next((s[len(mine):] for s in known if s.startswith(mine)), None)
+    # кадры прогона — копиями рядом со страницей; в публикацию события — кадры без отметки sent: каждый уходит,
+    # пока публикация с ним не пройдёт, а отправленные следующие публикации не несут
+    for copy, shot in frames.items():
+        if not copy.exists():
+            copy.parent.mkdir(exist_ok=True)
+            shutil.copyfile(shot, copy)
+    fresh = {f'{c.parent.name}/{c.name}': str(c.relative_to(root)) for c in frames if f'{c.parent.name}/{c.name}' not in sent}
+    if cmd != 'new':
+        uploads.update(fresh)
     files = f'картинки — в files публикации: {json.dumps(uploads, ensure_ascii=False)}; ' if uploads else ''
+    if fresh and cmd != 'new':
+        files += 'после удачной публикации — команда sent; '
     if lost:
         files += f'вопрос на странице без картинок — нет такого файла картинки в папке проекта: {", ".join(lost)}; '
     print(f'{rel}: {what}; {files}' + (f'адрес — {url}' if url else 'адреса нет — первая публикация'))
