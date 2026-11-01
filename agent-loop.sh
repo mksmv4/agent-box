@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Движок автоцикла: итерации /box-next по задаче проекта, пока статус таск-файла «в работе» или «блокер» с ответом пользователя.
-# Запуск на хосте из папки проекта: agent-loop.sh [--host | --no-firewall] [--quiet] <задача>; из любой папки — путём к таск-файлу: agent-loop.sh [--host | --no-firewall] [--quiet] <проект>/docs/tasks/<задача>.md
+# Запуск на хосте из папки проекта: agent-loop.sh [--host | --no-firewall] [--quiet] [--resume <id>] <задача>; из любой папки — путём к таск-файлу: agent-loop.sh [--host | --no-firewall] [--quiet] [--resume <id>] <проект>/docs/tasks/<задача>.md
+# --resume <id> — первая итерация запуска продолжает сессию, оборванную сбоем сети, API или лимитом подписки; дальше цикл идёт свежими сессиями.
 # Первый раз на машине — ./agent-loop.sh в папке клона: скрипт ставит себя и box-connect командами ссылками в ~/.local/bin.
 # Итерации идут в контейнере — сервисе claude из claude-box.yml проекта: сеть ограничена списком адресов, режим без вопросов о разрешениях;
 # --no-firewall — сеть контейнера открыта, режим auto; --host — итерации claude хоста в режиме auto.
@@ -118,20 +119,25 @@ if ! command -v agent-loop.sh >/dev/null || ! command -v box-connect >/dev/null;
   esac
 fi
 
-host= open= quiet=
+host= open= quiet= resume_id=
 while :; do
   case ${1:-} in
     --host) host=1 ;;
     --no-firewall) open=1 ;;
     --quiet) quiet=1 ;;
+    --resume)
+      [[ ${2:-} =~ ^[0-9a-f-]{36}$ ]] || stop 2 "--resume ждёт id сессии, получено «${2:-}»"
+      resume_id=$2
+      shift
+      ;;
     *) break ;;
   esac
   shift
 done
-usage="запуск: $me [--host | --no-firewall] [--quiet] <задача> из папки проекта или $me [--host | --no-firewall] [--quiet] <путь к таск-файлу> из любой папки; правило песочницы claude-box для сессии Claude хоста — $me --sandbox-rule"
+usage="запуск: $me [--host | --no-firewall] [--quiet] [--resume <id>] <задача> из папки проекта или $me [--host | --no-firewall] [--quiet] [--resume <id>] <путь к таск-файлу> из любой папки; правило песочницы claude-box для сессии Claude хоста — $me --sandbox-rule"
 [ $# -eq 0 ] && { say "$usage"; exit 0; }
 if [ "$1" = --sandbox-rule ]; then
-  [ $# -eq 1 ] && [ -z "$host$open$quiet" ] || { echo "$usage" >&2; exit 2; }
+  [ $# -eq 1 ] && [ -z "$host$open$quiet$resume_id" ] || { echo "$usage" >&2; exit 2; }
   sandbox_rule
 fi
 [ $# -eq 1 ] && [ -n "$1" ] || { echo "$usage" >&2; exit 2; }
@@ -306,20 +312,34 @@ progress='fromjson? | select(.type == "assistant" and (.isSidechain | not))
     else .name + " " + ($in | tostring | short) end
   | "\($t)   \(.)"'
 
-# история сессии — у контейнера в его домашней папке ~/.claude-box, у хоста в ~/.claude; файл появляется со стартом сессии.
-# Метка — процесс на время итерации: со смертью метки tail дочитывает файл и выходит
-follow() {
-  local dir=~/.claude/projects f= last=
+# история сессии — у контейнера в его домашней папке ~/.claude-box, у хоста в ~/.claude; файл появляется со стартом сессии
+history_file() {
+  local dir=~/.claude/projects
   [ -n "$host" ] || dir=~/.claude-box/.claude/projects
+  find "$dir" -maxdepth 2 -name "$sid.jsonl" -print -quit 2>/dev/null
+}
+
+# Метка — процесс на время итерации: со смертью метки tail дочитывает файл и выходит. seen — строки файла до резюме: их ход уже в журнале
+follow() {
+  local f= last=
   while :; do
     kill -0 "$mark" 2>/dev/null || last=1
-    f=$(find "$dir" -maxdepth 2 -name "$sid.jsonl" -print -quit 2>/dev/null)
+    f=$(history_file)
     [ -z "$f" ] || break
     [ -z "$last" ] || return 0
     sleep 1
   done
-  tail -n +1 -f --pid="$mark" "$f" | jq --unbuffered -Rr "$progress" >>"$log" 2>/dev/null
+  tail -n +"$((seen + 1))" -f --pid="$mark" "$f" | jq --unbuffered -Rr "$progress" >>"$log" 2>/dev/null
 }
+
+# резюме: сессия дописывает свой файл истории; файла нет — продолжать нечего
+seen=0
+if [ -n "$resume_id" ]; then
+  sid=$resume_id
+  f=$(history_file)
+  [ -n "$f" ] || stop 2 "нет истории сессии $sid — продолжать нечего"
+  seen=$(wc -l <"$f")
+fi
 
 i=0
 idle=0
@@ -360,7 +380,7 @@ $services"
   head=$(g rev-parse HEAD)
   # идентификатор сессии задаётся до запуска: его называет алерт таймера, пока итерация идёт.
   # Сессии контейнера лежат в его домашней папке — доследование тоже через сервис claude
-  sid=$(cat /proc/sys/kernel/random/uuid)
+  sid=${resume_id:-$(cat /proc/sys/kernel/random/uuid)}
   resume="claude --resume $sid"
   [ -n "$host" ] || resume="docker compose -f $cf run --rm $resume"
   say "задача $task — итерация $i/$max_iter, $(date +%H:%M), сессия $sid"
@@ -390,7 +410,10 @@ $services"
     notify "$msg"
   ) &
   timer=$!
-  args=(-p "/box-next $task" --session-id "$sid" --permission-mode "$mode" --permission-prompts none
+  # начало сессии: свежая на шаг очереди или продолжение оборванной — с тем же id и файлом истории
+  start=(-p "/box-next $task" --session-id "$sid")
+  [ -z "$resume_id" ] || start=(-p "Сессию оборвал технический сбой: сеть, API или лимит подписки. Продолжи шаг с места обрыва и заверши сессию по docs/PROTOCOL.md." --resume "$sid")
+  args=("${start[@]}" --permission-mode "$mode" --permission-prompts none
     --output-format json --max-turns "$max_turns")
   # окружение итерации: сигнал context-guard — протокол молча; кэш промпта на пять минут вместо часового по умолчанию подписки — отсчёт идёт
   # от последнего вызова, вызовы внутри итерации идут чаще, а следующая итерация стартует новой сессией; запись в кэш на час стоит 2× входа, на пять минут — 1,25×.
@@ -410,6 +433,7 @@ $services"
   wait "$mark" 2>/dev/null
   mark=
   wait "$follower"
+  resume_id= seen=0
 
   # итог итерации: JSON на stdout; ненулевой код, is_error или stdout без JSON — провал.
   # -s ловит и пустой stdout: jq 1.6 с одним -e пропускает его с кодом 0
