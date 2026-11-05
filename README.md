@@ -212,7 +212,7 @@ agent-loop.sh --sandbox-rule
 
 Команду запускаешь ты, потому что Claude в режиме auto получает отказ на запись своих разрешений. Команда оставит рядом с настройками их копию с датой. В конце она покажет запись так, как её видит Claude Code, или напишет, что запись не применилась.
 
-Запись — подсказка проверке режима auto: отказы станут редкими, но гарантии нет. Что запись разрешает — [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) § Ступени изоляции. После обновления agent-box команду нужно повторить.
+Запись — подсказка проверке режима auto: отказы станут редкими, но гарантии нет. Что запись разрешает — [docs/architecture/container.md](docs/architecture/container.md) § Ступени изоляции. После обновления agent-box команду нужно повторить.
 
 ## Вести задачу скриптом
 
@@ -307,7 +307,7 @@ agent-loop.sh --host <задача>
 agent-loop.sh --host <задача>
 ```
 
-Устройство режимов — [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) § Ступени изоляции.
+Устройство режимов — [docs/architecture/container.md](docs/architecture/container.md) § Ступени изоляции.
 
 ### Проверить уведомления Telegram
 
@@ -386,7 +386,7 @@ rm -rf "$d"
 
 Если сборка документации в проекте уже закончена, `/box-init` заведёт новую — задачу `docs-<дата>` с вехой в роадмапе. Вести её или нет — решаешь ты.
 
-`/box-init` вместо `/box-update` годится и для копии с `claude-box.yml`. Он ещё обновит правила проекта и сверит сборку документации. Строки для `claude-box.yml` он выдаст в итоге — допиши их руками. Подробно — [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) § Скиллы контейнера.
+`/box-init` вместо `/box-update` годится и для копии с `claude-box.yml`. Он ещё обновит правила проекта и сверит сборку документации. Строки для `claude-box.yml` он выдаст в итоге — допиши их руками. Подробно — [docs/architecture/template.md](docs/architecture/template.md) § Скиллы контейнера.
 
 ## Подключить проект в рабочей копии git
 
@@ -445,8 +445,8 @@ agent-loop.sh --host <задача>
 ## Как это устроено
 
 - Цели agent-box и ключевые решения — [docs/DESCRIPTION.md](docs/DESCRIPTION.md).
-- Устройство: контейнер, скрипт, оркестратор, ограничение сети, образ — [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+- Устройство: контейнер, скрипт, оркестратор, ограничение сети, образ — [docs/architecture/ARCHITECTURE.md](docs/architecture/ARCHITECTURE.md).
 - Слова agent-box — блокер, итерация, движок и другие — [docs/GLOSSARY.md](docs/GLOSSARY.md).
 - Правила работы сессий: шаг, файл задачи, вопросы, коммит — [template/docs/PROTOCOL.md](template/docs/PROTOCOL.md).
 
-Хук context-guard завершает сессию Claude до переполнения контекста: сессия получает сигнал и сохраняет работу по протоколу. Скрипта хука в agent-box пока нет, без него всё работает. Длинная сессия тогда доходит до встроенного сжатия истории Claude Code. Устройство — [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) § Хук context-guard.
+Хук context-guard завершает сессию Claude до переполнения контекста: сессия получает сигнал и сохраняет работу по протоколу. Скрипта хука в agent-box пока нет, без него всё работает. Длинная сессия тогда доходит до встроенного сжатия истории Claude Code. Устройство — [docs/architecture/container.md](docs/architecture/container.md) § Хук context-guard.
