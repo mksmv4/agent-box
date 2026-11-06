@@ -154,19 +154,21 @@ details[open] > summary { margin-bottom: 4px; }
 /* кнопка «Наверх»: одна на страницу, внизу справа, появляется после двух экранов прокрутки */
 .top { position: fixed; right: 16px; bottom: 16px; padding: 10px 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 999px; font-size: .875rem; font-weight: 600; text-decoration: none; box-shadow: 0 2px 8px rgb(0 0 0 / .15); opacity: 0; pointer-events: none; transition: opacity .2s; }
 .top.on { opacity: 1; pointer-events: auto; }
-/* просмотр картинки: нажатие на картинку открывает её поверх страницы целиком в экране; у обложки сценария — кадры по порядку */
+/* просмотр картинки: нажатие на картинку открывает её поверх страницы целиком в экране; у обложки сценария — ленту его кадров:
+   куски вплотную друг под другом, ширина — доля ширины окна --z, лента шире окна прокручивается вбок */
 .page img { cursor: zoom-in; }
-.view { width: 100%; height: 100%; max-width: none; max-height: none; margin: 0; padding: 16px; box-sizing: border-box; border: 0; background: rgb(0 0 0 / .95); cursor: zoom-out; }
-.view[open] { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; }
-.view img { max-width: 100%; max-height: calc(100% - 52px); min-height: 0; object-fit: contain; }
-.view.one img { max-height: 100%; }
-.view.one .bar { display: none; }
-.view button, .view .count { padding: 8px 14px; background: var(--surface); color: var(--fg); border: 1px solid var(--line); border-radius: 999px; font: inherit; font-size: .875rem; font-weight: 600; }
-.view button { cursor: pointer; }
+/* страница под открытым окном стоит: у ленты одна полоса прокрутки, место на странице после закрытия прежнее */
+html:has(.view[open]) { overflow: hidden; }
+.view { width: 100%; height: 100%; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; background: rgb(0 0 0 / .95); }
+.view[open] { display: flex; }
+.tape { flex: 1; min-width: 0; overflow: auto; overscroll-behavior: contain; outline: 0; cursor: grab; }
+.tape img { display: block; width: calc(var(--z, 1) * 100%); max-width: none; height: auto; margin-inline: auto; }
+.view.one .tape { display: flex; align-items: center; justify-content: center; padding: 16px; box-sizing: border-box; cursor: zoom-out; }
+.view.one .tape img { width: auto; max-width: 100%; max-height: 100%; min-height: 0; object-fit: contain; }
+.view.one .zoom { display: none; }
+.view .bar { position: fixed; top: 12px; right: 12px; display: flex; gap: 8px; }
+.view button { min-width: 40px; padding: 8px 14px; background: var(--surface); color: var(--fg); border: 1px solid var(--line); border-radius: 999px; font: inherit; font-size: .875rem; font-weight: 600; cursor: pointer; }
 .view button:disabled { opacity: .4; cursor: default; }
-.view > button { position: fixed; top: 12px; right: 12px; }
-.view .bar { display: flex; align-items: center; gap: 8px; cursor: default; }
-.view .count { font-weight: 400; white-space: nowrap; }
 </style>
 
 <div class="page" id="top">
@@ -326,7 +328,7 @@ details[open] > summary { margin-bottom: 4px; }
 
 <a class="top" href="#top">↑ Наверх</a>
 
-<dialog class="view" aria-label="Картинка целиком"><button type="button">✕ Закрыть</button><img alt=""><p class="bar"><button type="button">← Назад</button><span class="count"></span><button type="button">Дальше →</button></p></dialog>
+<dialog class="view" aria-label="Просмотр картинки"><div class="tape" tabindex="-1"></div><div class="bar"><button type="button" class="zoom" aria-label="Уменьшить">−</button><button type="button" class="zoom" aria-label="Увеличить">+</button><button type="button">✕ Закрыть</button></div></dialog>
 
 <script>
 // кнопка «Наверх» — после двух экранов прокрутки
@@ -342,43 +344,57 @@ const mark = () => {
 };
 addEventListener('scroll', mark, { passive: true });
 mark();
-// просмотр картинки: нажатие на картинку страницы — она в окне поверх страницы; у обложки сценария — все его кадры по порядку,
-// листание — кнопками, нажатием на кадр и стрелками клавиатуры; закрытие — крестиком, нажатием мимо картинки или на последний кадр, Esc;
+// просмотр картинки: нажатие на картинку страницы — она целиком в окне поверх страницы, закрытие — крестиком, нажатием или Esc;
+// у обложки сценария — лента его кадров из кусков data-show на ширину окна: листание прокруткой, «+» и «−» меняют ширину ленты,
+// увеличенная лента двигается вбок прокруткой и перетаскиванием мышью; закрытие — крестиком и Esc;
 // картинка в ссылке на свой файл открывается так же — переход по ссылке отменяется
 const view = document.querySelector('.view');
-const viewImg = view.querySelector('img');
-const bar = view.querySelector('.bar');
-const [back, forth] = bar.querySelectorAll('button');
-const count = bar.querySelector('.count');
-let shots = [], at = 0;
-const show = i => {
-  at = Math.max(0, Math.min(i, shots.length - 1));
-  viewImg.src = shots[at];
-  count.textContent = `кадр ${at + 1} из ${shots.length}`;
-  back.disabled = at === 0;
-  forth.disabled = at === shots.length - 1;
-  // следующий кадр — загрузкой заранее: листание без ожидания
-  if (shots[at + 1]) new Image().src = shots[at + 1];
+const tape = view.querySelector('.tape');
+const [less, more, shut] = view.querySelectorAll('button');
+let level = 0;
+const zoom = d => {
+  // ширина ленты — 1,5 в степени level от ширины окна, от 0,3 до 7,6; точка в середине окна остаётся в середине
+  const was = level;
+  level = Math.max(-3, Math.min(level + d, 5));
+  const r = 1.5 ** (level - was), x = tape.scrollLeft + tape.clientWidth / 2, y = tape.scrollTop + tape.clientHeight / 2;
+  tape.style.setProperty('--z', 1.5 ** level);
+  tape.scrollTo(x * r - tape.clientWidth / 2, y * r - tape.clientHeight / 2);
+  less.disabled = level === -3;
+  more.disabled = level === 5;
 };
 document.addEventListener('click', e => {
   const img = e.target.closest('.page img');
   if (!img) return;
   e.preventDefault();
-  shots = img.dataset.show ? img.dataset.show.split(' ') : [img.currentSrc || img.src];
-  viewImg.alt = img.alt;
-  view.classList.toggle('one', shots.length < 2);
-  show(0);
+  const parts = img.dataset.show ? img.dataset.show.split(' ') : [img.currentSrc || img.src];
+  view.classList.toggle('one', !img.dataset.show);
+  tape.replaceChildren(...parts.map((src, i) => Object.assign(new Image(), {
+    src, draggable: false, alt: img.dataset.show ? `Кадры сценария, часть ${i + 1} из ${parts.length}` : img.alt })));
   view.showModal();
+  zoom(-level);
+  // лента — с начала: закрытое окно держит прокрутку прошлого просмотра; фокус — на ленте: стрелки, пробел и Page Down листают её
+  tape.scrollTo(0, 0);
+  tape.focus();
 });
 view.addEventListener('click', e => {
-  if (e.target === back) show(at - 1);
-  else if (e.target === forth || (e.target === viewImg && at < shots.length - 1)) show(at + 1);
-  else if (!bar.contains(e.target)) view.close();
+  if (e.target === less) zoom(-1);
+  else if (e.target === more) zoom(1);
+  else if (e.target === shut || view.classList.contains('one')) view.close();
 });
-// стрелки — на всём документе: кнопка, ставшая недоступной на крайнем кадре, отдаёт фокус странице
-document.addEventListener('keydown', e => {
-  if (!view.open) return;
-  if (e.key === 'ArrowLeft') show(at - 1);
-  if (e.key === 'ArrowRight') show(at + 1);
+// закрытое окно отпускает картинки: кусок ленты — десятки мегапикселей в памяти телефона
+view.addEventListener('close', () => tape.replaceChildren());
+// перетаскивание мышью — за картинку: нажатие на полосу прокрутки остаётся прокрутке браузера
+let grip = null;
+tape.addEventListener('pointerdown', e => {
+  if (e.pointerType !== 'mouse' || e.button || e.target === tape || view.classList.contains('one')) return;
+  grip = [e.clientX, e.clientY];
+  tape.setPointerCapture(e.pointerId);
 });
+tape.addEventListener('pointermove', e => {
+  if (!grip) return;
+  tape.scrollBy(grip[0] - e.clientX, grip[1] - e.clientY);
+  grip = [e.clientX, e.clientY];
+});
+// конец перетаскивания — отпускание кнопки и потеря захвата указателя
+tape.addEventListener('lostpointercapture', () => { grip = null; });
 </script>

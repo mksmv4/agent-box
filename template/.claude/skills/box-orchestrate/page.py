@@ -353,7 +353,7 @@ def render_browser(root, task, stages, store, frames):
         st = PASSED if result.startswith('прошёл') else MISSED if result.startswith('не прошёл') else TODO
         tally[st] += 1
         mine = [shot for _, shot in sorted(shots.get(n, []))]
-        # обложка — последний кадр сценария, нажатие открывает ленту его кадров
+        # обложка — последний кадр сценария; куски ленты — в data-show через пробел, нажатие на обложку открывает их лентой
         if mine:
             face, strips = ribbon(store, rounds[-1], n, mine, frames)
             src = [html.escape(f'{store.name}/{c.name}') for c in strips]
@@ -375,7 +375,7 @@ def render_browser(root, task, stages, store, frames):
         items += ['  <div class="sc">', f'    {cover}', '    <div>', *('      ' + s for s in text), '    </div>', '  </div>']
     total = sum(tally.values())
     head = ['<p class="note">Сессия проходит сценарии в приложении так, как прошёл бы пользователь, и снимает экран после каждого действия. '
-            'Нажми на снимок — кадры сценария листаются по порядку.</p>',
+            'Нажми на снимок — откроется лента кадров сценария: листай её прокруткой, кнопки «+» и «−» меняют размер.</p>',
             f'<p>Прошли — {tally[PASSED]}, не прошли — {tally[MISSED]}, впереди — {tally[TODO]} из {total} '
             f'{plural(total, "сценария", "сценариев", "сценариев")}.</p>']
     return (['<li><a href="#browser">Проверка в браузере</a></li>'],
