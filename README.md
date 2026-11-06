@@ -10,7 +10,7 @@ agent-box запускает Claude Code в Docker-контейнере и ве�
 
 ## Быстрый старт
 
-Нужны Docker с Compose, `git`, `jq` и подписка Claude. Оркестратору нужны ещё [Claude Code на компьютере](https://code.claude.com/docs/en/quickstart) и `python3`. Проверено только на Linux.
+Нужны Docker с Compose, `git`, `jq` и подписка Claude. Оркестратору нужны ещё [Claude Code на компьютере](https://code.claude.com/docs/en/quickstart), `python3` и библиотека Pillow — `sudo apt install python3-pil`. Проверено только на Linux.
 
 ### 1. Поставь agent-box
 

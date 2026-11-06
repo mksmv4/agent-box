@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 # Скрипт страницы задачи оркестратора: правит файл my_local/pages/<задача>.html по меткам <!-- page:имя --> … <!-- /page:имя -->,
-# всё вне меток — каркас примера examples/running.html; картинки вопроса и кадры прогона в браузере — копиями в my_local/pages/<задача>/.
-# Данные — таск-файл, журнал цикла, сценарии QA с их снимками экрана и текст оркестратора со stdin.
+# всё вне меток — каркас примера examples/running.html; картинки вопроса — копиями в my_local/pages/<задача>/, кадры прогона
+# в браузере — там же лентами и обложками WebP. Данные — таск-файл, журнал цикла, сценарии QA с их снимками экрана и текст
+# оркестратора со stdin. Склейка кадров — библиотекой Pillow: она нужна, когда у задачи есть снимки прогона.
 # Вызов из корня проекта: python3 .claude/skills/box-orchestrate/page.py <задача> <команда> [адрес] <<'EOF' … EOF
 # Команды и форма текста — SKILL.md рядом, шаг «Страница задачи», текст question — questions.md; устройство страницы и метки — pages.md.
 import hashlib
@@ -9,11 +10,15 @@ import html
 import json
 import mimetypes
 import re
-import shutil
 import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
+
+try:
+    from PIL import Image
+except ImportError:
+    Image = None
 
 SKELETON = Path(__file__).resolve().parent / 'examples' / 'running.html'
 MARKS = ['title', 'name', 'meta', 'lead', 'where', 'updated', 'toc-ask', 'ask', 'goals', 'steps', 'now', 'toc-browser', 'browser',
@@ -30,6 +35,12 @@ COUNT = {2: 'двух', 3: 'трёх', 4: 'четырёх'}
 LETTERS = 'abcd'
 ENGINE = 'движок — скрипт, который запускает Claude на шаги по очереди, —'
 ORCH = 'оркестратор — Claude, который ведёт задачу, —'
+# кусок ленты кадров — до 16 000 пикселей в высоту: WebP держит до 16 383
+STRIP, QUALITY = 16000, 80
+# записей в files одного ответа — до 255, остаток уходит со следующим событием
+FILES = 255
+PILLOW = ('нет библиотеки Pillow для склейки кадров прогона — установка: sudo apt install python3-pil, '
+          'вне Debian и Ubuntu — python3 -m pip install Pillow; страница не обновлена')
 
 
 def fail(code, msg):
@@ -277,6 +288,50 @@ def plain(s):
     return esc(s.replace('**', '').replace('`', '').strip())
 
 
+def stamp(part):
+    # ключ файла — имена, размеры и время правки снимков, из которых он собран: новый или переснятый кадр — новое имя,
+    # и публикация несёт новый файл, а прежний убирает уборка
+    return hashlib.sha1(''.join(f'{s.name} {s.stat().st_size} {s.stat().st_mtime_ns}\n' for s, _ in part).encode()).hexdigest()[:10]
+
+
+def build(copy, part):
+    # кадры друг под другом по левому краю, фон — белый; запись через временный файл: команда, оборванная посреди склейки,
+    # оставляет только .part, и следующая команда собирает кусок заново
+    strip = Image.new('RGB', (max(w for _, (w, _) in part), sum(h for _, (_, h) in part)), 'white')
+    y = 0
+    for shot, size in part:
+        with Image.open(shot) as im:
+            frame = im.convert('RGB')
+        strip.paste(frame if frame.size == size else frame.resize(size), (0, y))
+        y += size[1]
+    copy.parent.mkdir(exist_ok=True)
+    tmp = copy.with_name(copy.name + '.part')
+    strip.save(tmp, 'WEBP', quality=QUALITY)
+    tmp.replace(copy)
+
+
+def ribbon(store, rnd, n, shots, frames):
+    # кадры сценария по порядку — куски ленты до STRIP пикселей в высоту и обложка — последний кадр; кадр выше STRIP
+    # уменьшается до STRIP; файлы собираются один раз — по ключу в имени
+    sized = []
+    for shot in shots:
+        with Image.open(shot) as im:
+            w, h = im.size
+        sized.append((shot, (w * STRIP // h, STRIP) if h > STRIP else (w, h)))
+    parts = [[]]
+    for frame in sized:
+        if parts[-1] and sum(h for _, (_, h) in parts[-1]) + frame[1][1] > STRIP:
+            parts.append([])
+        parts[-1].append(frame)
+    out = [(store / f'qa-{rnd}-{n}-{i}-{stamp(p)}.webp', p) for i, p in enumerate(parts, 1)]
+    cover = store / f'qa-{rnd}-{n}-cover-{stamp(sized[-1:])}.webp'
+    for copy, part in [*out, (cover, sized[-1:])]:
+        if not copy.exists():
+            build(copy, part)
+        frames.add(copy)
+    return cover, [copy for copy, _ in out]
+
+
 def render_browser(root, task, stages, store, frames):
     # «Проверка в браузере»: сценарии QA с итогом и кадрами последнего захода; файла сценариев нет — раздела нет
     scen = root / 'docs' / 'qa' / f'{task}.md'
@@ -289,22 +344,25 @@ def render_browser(root, task, stages, store, frames):
         for f in folder.iterdir():
             if (m := SHOT.match(f.name)) and int(m[1]) == rounds[-1]:
                 shots.setdefault(int(m[2]), []).append((int(m[3]), f))
+    if shots and Image is None:
+        fail(2, PILLOW)
     items, tally = [], {PASSED: 0, MISSED: 0, TODO: 0}
     for m in SCENARIO.finditer(scen.read_text()):
         n, f = int(m[1]), dict(FIELD.findall(m[3]))
         result = f.get('Итог', '').strip()
         st = PASSED if result.startswith('прошёл') else MISSED if result.startswith('не прошёл') else TODO
         tally[st] += 1
-        src = []
-        for _, shot in sorted(shots.get(n, [])):
-            copy = store / f'qa-{shot.name}'
-            frames[copy] = shot
-            src.append(html.escape(f'{store.name}/{copy.name}'))
-        # обложка — последний кадр сценария, нажатие открывает все кадры по порядку
-        k = len(src)
-        cover = (f'<figure class="shot"><img src="{src[-1]}" data-show="{" ".join(src)}" alt="Сценарий {n}: последний из {k} '
-                 f'{plural(k, "кадра", "кадров", "кадров")}" loading="lazy"><figcaption class="note">{k} '
-                 f'{plural(k, "кадр", "кадра", "кадров")}</figcaption></figure>') if src else '<p class="note shot">Кадров нет</p>'
+        mine = [shot for _, shot in sorted(shots.get(n, []))]
+        # обложка — последний кадр сценария, нажатие открывает ленту его кадров
+        if mine:
+            face, strips = ribbon(store, rounds[-1], n, mine, frames)
+            src = [html.escape(f'{store.name}/{c.name}') for c in strips]
+            k = len(mine)
+            cover = (f'<figure class="shot"><img src="{html.escape(f"{store.name}/{face.name}")}" data-show="{" ".join(src)}" '
+                     f'alt="Сценарий {n}: последний из {k} {plural(k, "кадра", "кадров", "кадров")}" loading="lazy">'
+                     f'<figcaption class="note">{k} {plural(k, "кадр", "кадра", "кадров")}</figcaption></figure>')
+        else:
+            cover = '<p class="note shot">Кадров нет</p>'
         text = [f'<h3>{n}. {plain(m[2])} {label(st)}</h3>']
         if re.search(r'^Вне задачи', m[3], re.M):
             text.append('<p class="note">Вне задачи: то, чего задача не обещала, — пользователь может так сломать приложение.</p>')
@@ -427,8 +485,9 @@ def main():
     known = links.read_text().splitlines() if links.exists() else []
     mine = f'- {task} — '
     url = next((s[len(mine):] for s in known if s.startswith(mine)), None)
-    # кадры прогона, которые уже дошли до страницы: их отмечает команда sent после удачной публикации
-    ledger = pages / task / 'sent.txt'
+    # файлы кадров прогона, которые уже дошли до страницы, и кадры последнего ответа скрипта — новые и убранные (null):
+    # отметки по ним правит команда sent после удачной публикации
+    ledger, sending = pages / task / 'sent.txt', pages / task / 'sending.json'
     sent = set(ledger.read_text().split()) if ledger.exists() else set()
 
     if cmd == 'link':
@@ -443,11 +502,12 @@ def main():
         return
 
     if cmd == 'sent':
-        page = file.read_text() if file.exists() else ''
-        shown = set(re.findall(rf'{re.escape(html.escape(task))}/qa-[^"\s]+', page))
-        ledger.parent.mkdir(exist_ok=True)
-        ledger.write_text(''.join(f'{s}\n' for s in sorted(sent | shown)))
-        print(f'{ledger.relative_to(root)}: кадры прогона на странице отмечены отправленными — {len(shown)}')
+        out = json.loads(sending.read_text()) if sending.exists() else {}
+        added, gone = {k for k, v in out.items() if v}, {k for k, v in out.items() if v is None}
+        if out:
+            ledger.write_text(''.join(f'{s}\n' for s in sorted(sent - gone | added)))
+            sending.write_text('{}')
+        print(f'{ledger.relative_to(root)}: кадры прогона отмечены отправленными — {len(added)}, сняты с отметок — {len(gone)}')
         return
 
     text = sys.stdin.read() if not sys.stdin.isatty() else ''
@@ -456,7 +516,7 @@ def main():
     except json.JSONDecodeError as e:
         fail(2, f'текст команды {cmd} — не JSON: {e}')
     now = datetime.now()
-    copies, uploads, lost, frames = {}, {}, [], {}
+    copies, uploads, lost, frames = {}, {}, [], set()
 
     if cmd == 'new':
         page = SKELETON.read_text()
@@ -516,18 +576,23 @@ def main():
         file.write_text(page)
         changed = [m for m in MARKS if page[slice(*span(page, m)[:2])] != before[slice(*span(before, m)[:2])]]
         what = 'изменено: ' + ', '.join(changed) if changed else 'без изменений'
-    # кадры прогона — копиями рядом со страницей; в публикацию события — кадры без отметки sent: каждый уходит,
-    # пока публикация с ним не пройдёт, а отправленные следующие публикации не несут
-    for copy, shot in frames.items():
-        if not copy.exists():
-            copy.parent.mkdir(exist_ok=True)
-            shutil.copyfile(shot, copy)
-    fresh = {f'{c.parent.name}/{c.name}': str(c.relative_to(root)) for c in frames if f'{c.parent.name}/{c.name}' not in sent}
+    # в публикацию события — файлы кадров без отметки sent и отмеченные файлы, которых страница больше не показывает, —
+    # со значением null, публикация убирает их; убранные — вперёд новых: версия страницы держит до 511 файлов.
+    # Файл уходит, пока публикация с ним не пройдёт, отправленные следующие публикации не несут
+    out, rest = {}, 0
     if cmd != 'new':
-        uploads.update(fresh)
+        shown = {f'{c.parent.name}/{c.name}': str(c.relative_to(root)) for c in sorted(frames)}
+        out = {s: None for s in sorted(sent - shown.keys())} | {k: v for k, v in shown.items() if k not in sent}
+        room = FILES - len(uploads)
+        out, rest = dict(list(out.items())[:room]), max(len(out) - room, 0)
+        if out:
+            sending.write_text(json.dumps(out, ensure_ascii=False))
+        uploads.update(out)
     files = f'картинки — в files публикации: {json.dumps(uploads, ensure_ascii=False)}; ' if uploads else ''
-    if fresh and cmd != 'new':
+    if out:
         files += 'после удачной публикации — команда sent; '
+    if rest:
+        files += f'ещё {rest} {plural(rest, "файл", "файла", "файлов")} кадров — со следующим событием; '
     if lost:
         files += f'вопрос на странице без картинок — нет такого файла картинки в папке проекта: {", ".join(lost)}; '
     print(f'{rel}: {what}; {files}' + (f'адрес — {url}' if url else 'адреса нет — первая публикация'))
