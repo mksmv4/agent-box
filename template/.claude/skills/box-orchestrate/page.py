@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 # Скрипт страницы задачи оркестратора: правит файл my_local/pages/<задача>.html по меткам <!-- page:имя --> … <!-- /page:имя -->,
 # всё вне меток — каркас примера examples/running.html; картинки вопроса — копиями в my_local/pages/<задача>/, кадры прогона
-# в браузере — там же лентами и обложками WebP. Данные — таск-файл, журнал цикла, сценарии QA с их снимками экрана и текст
-# оркестратора со stdin. Склейка кадров — библиотекой Pillow: она нужна, когда у задачи есть снимки прогона.
+# в браузере — там же лентами с подписями сессии QA под кадрами и обложками WebP. Данные — таск-файл, журнал цикла, сценарии QA
+# с их снимками экрана и подписями и текст оркестратора со stdin. Склейка кадров — библиотекой Pillow: она нужна, когда у задачи
+# есть снимки прогона; подписи — шрифтом DejaVu Sans.
 # Вызов из корня проекта: python3 .claude/skills/box-orchestrate/page.py <задача> <команда> [адрес] <<'EOF' … EOF
 # Команды и форма текста — SKILL.md рядом, шаг «Страница задачи», текст question — questions.md; устройство страницы и метки — pages.md.
+import functools
 import hashlib
 import html
 import json
@@ -16,7 +18,7 @@ from datetime import datetime
 from pathlib import Path
 
 try:
-    from PIL import Image
+    from PIL import Image, ImageDraw, ImageFont
 except ImportError:
     Image = None
 
@@ -41,6 +43,10 @@ STRIP, QUALITY = 16000, 80
 FILES = 255
 PILLOW = ('нет библиотеки Pillow для склейки кадров прогона — установка: sudo apt install python3-pil, '
           'вне Debian и Ubuntu — python3 -m pip install Pillow; страница не обновлена')
+# подпись под кадром ленты: шрифт с кириллицей — Pillow ищет файл в папках шрифтов системы; полоса — тёмная, текст — белый:
+# на светлом сайте подпись видна отдельно от его интерфейса
+FONT, BAND, INK = 'DejaVuSans.ttf', '#1b1f27', '#ffffff'
+NOFONT = 'нет шрифта DejaVu Sans для подписей кадров прогона — установка: sudo apt install fonts-dejavu-core; страница не обновлена'
 
 
 def fail(code, msg):
@@ -288,22 +294,60 @@ def plain(s):
     return esc(s.replace('**', '').replace('`', '').strip())
 
 
+def words(shot):
+    # подпись кадра — файл <снимок>.txt рядом со снимком: что сессия QA сделала и что должно быть видно
+    f = shot.with_suffix('.txt')
+    return ' '.join(f.read_text(errors='replace').split()) if f.is_file() else ''
+
+
+@functools.cache
+def typeface(size):
+    try:
+        return ImageFont.truetype(FONT, size)
+    except OSError:
+        fail(2, NOFONT)
+
+
+def band(text, w):
+    # полоса подписи под кадром ширины w: кегль — 1/50 ширины кадра, строки — по словам в ширину кадра с полями в полкегля;
+    # ответ — шрифт, строки и высота полосы
+    if not text:
+        return None, [], 0
+    size = max(w // 50, 12)
+    face, lines = typeface(size), []
+    for word in text.split():
+        if lines and face.getlength(f'{lines[-1]} {word}') <= w - size:
+            lines[-1] += ' ' + word
+        else:
+            lines.append(word)
+    return face, lines, len(lines) * size * 13 // 10 + size
+
+
 def stamp(part):
-    # ключ файла — имена, размеры и время правки снимков, из которых он собран: новый или переснятый кадр — новое имя,
-    # и публикация несёт новый файл, а прежний убирает уборка
-    return hashlib.sha1(''.join(f'{s.name} {s.stat().st_size} {s.stat().st_mtime_ns}\n' for s, _ in part).encode()).hexdigest()[:10]
+    # ключ файла — имена, размеры и время правки снимков, из которых он собран, и подписи кадров: новый или переснятый кадр
+    # и новая подпись — новое имя, и публикация несёт новый файл, а прежний убирает уборка; у кадров без подписей ключ
+    # тот же, что у лент до подписей, и такие ленты остаются прежними файлами
+    return hashlib.sha1(''.join(f'{s.name} {s.stat().st_size} {s.stat().st_mtime_ns}{f" {t}" if t else ""}\n'
+                                for s, _, t, _ in part).encode()).hexdigest()[:10]
 
 
 def build(copy, part):
-    # кадры друг под другом по левому краю, фон — белый; запись через временный файл: команда, оборванная посреди склейки,
-    # оставляет только .part, и следующая команда собирает кусок заново
-    strip = Image.new('RGB', (max(w for _, (w, _) in part), sum(h for _, (_, h) in part)), 'white')
+    # кадры друг под другом по левому краю, под подписанным кадром — полоса подписи во всю ширину куска, фон — белый;
+    # запись через временный файл: команда, оборванная посреди склейки, оставляет только .part, и следующая команда
+    # собирает кусок заново
+    strip = Image.new('RGB', (max(w for _, (w, _), _, _ in part), sum(t for *_, t in part)), 'white')
+    draw = ImageDraw.Draw(strip)
     y = 0
-    for shot, size in part:
+    for shot, size, text, tall in part:
         with Image.open(shot) as im:
             frame = im.convert('RGB')
         strip.paste(frame if frame.size == size else frame.resize(size), (0, y))
-        y += size[1]
+        face, lines, _ = band(text, size[0])
+        if lines:
+            draw.rectangle((0, y + size[1], strip.width, y + tall), fill=BAND)
+            for i, line in enumerate(lines):
+                draw.text((face.size // 2, y + size[1] + face.size // 2 + i * face.size * 13 // 10), line, font=face, fill=INK)
+        y += tall
     copy.parent.mkdir(exist_ok=True)
     tmp = copy.with_name(copy.name + '.part')
     strip.save(tmp, 'WEBP', quality=QUALITY)
@@ -311,21 +355,26 @@ def build(copy, part):
 
 
 def ribbon(store, rnd, n, shots, frames):
-    # кадры сценария по порядку — куски ленты до STRIP пикселей в высоту и обложка — последний кадр; кадр выше STRIP
-    # уменьшается до STRIP; файлы собираются один раз — по ключу в имени
+    # кадры сценария по порядку с подписями — куски ленты до STRIP пикселей в высоту и обложка — последний кадр без подписи;
+    # кадр — (снимок, размер в ленте, подпись, высота с полосой подписи), кадр с полосой выше STRIP уменьшается под STRIP;
+    # файлы собираются один раз — по ключу в имени
     sized = []
     for shot in shots:
         with Image.open(shot) as im:
             w, h = im.size
-        sized.append((shot, (w * STRIP // h, STRIP) if h > STRIP else (w, h)))
+        text = words(shot)
+        room = STRIP - band(text, w)[2]
+        size = (w * room // h, room) if h > room else (w, h)
+        sized.append((shot, size, text, size[1] + band(text, size[0])[2]))
     parts = [[]]
     for frame in sized:
-        if parts[-1] and sum(h for _, (_, h) in parts[-1]) + frame[1][1] > STRIP:
+        if parts[-1] and sum(t for *_, t in parts[-1]) + frame[3] > STRIP:
             parts.append([])
         parts[-1].append(frame)
     out = [(store / f'qa-{rnd}-{n}-{i}-{stamp(p)}.webp', p) for i, p in enumerate(parts, 1)]
-    cover = store / f'qa-{rnd}-{n}-cover-{stamp(sized[-1:])}.webp'
-    for copy, part in [*out, (cover, sized[-1:])]:
+    last = [(*sized[-1][:2], '', sized[-1][1][1])]
+    cover = store / f'qa-{rnd}-{n}-cover-{stamp(last)}.webp'
+    for copy, part in [*out, (cover, last)]:
         if not copy.exists():
             build(copy, part)
         frames.add(copy)
