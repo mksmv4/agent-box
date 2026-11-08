@@ -27,9 +27,12 @@ for d in api.anthropic.com claude.ai platform.claude.com downloads.claude.ai cod
   registry.npmjs.org pypi.org files.pythonhosted.org; do
   resolve web "$d"
 done
-gh=$(curl -fsS --max-time 15 https://api.github.com/meta | jq -r '(.web + .api + .git)[] | select(contains(":") | not)') ||
-  { say "диапазоны GitHub не получены"; exit 1; }
-web+=($gh)
+# диапазоны GitHub — у самого GitHub: сбой его API закрывает GitHub до конца сессии, сеть остального списка работает
+if gh=$(curl -fsS --max-time 15 https://api.github.com/meta | jq -r '(.web + .api + .git)[] | select(contains(":") | not)'); then
+  web+=($gh)
+else
+  say "предупреждение: диапазоны GitHub не получены — GitHub закрыт до конца сессии"
+fi
 mapfile -t web < <(printf '%s\n' "${web[@]}" | sort -u)
 
 # свои адреса проекта — CLAUDE_BOX_ALLOW в environment: сервиса claude: домены, адреса IPv4 и подсети через пробел или запятую, все порты

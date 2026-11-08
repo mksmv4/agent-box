@@ -440,6 +440,10 @@ $services"
   json=0
   jq -se 'length == 1 and (.[0] | type == "object")' "$tmp/out" >/dev/null 2>&1 && json=1
 
+  # предупреждения ограничения сети в журнал: итерация идёт, часть адресов закрыта
+  warn=$(grep '^claude-box-firewall: предупреждение:' "$tmp/err")
+  [ -z "$warn" ] || logl "$warn"
+
   # конец итерации в журнал: длительность, исход — terminal_reason и ходы итога, статус задачи, коммиты итерации
   dur=$((SECONDS - t0))
   outcome="итога JSON нет"
