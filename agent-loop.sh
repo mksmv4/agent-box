@@ -418,13 +418,13 @@ $services"
   # окружение итерации: сигнал context-guard — протокол молча; кэш промпта на пять минут вместо часового по умолчанию подписки — отсчёт идёт
   # от последнего вызова, вызовы внутри итерации идут чаще, а следующая итерация стартует новой сессией; запись в кэш на час стоит 2× входа, на пять минут — 1,25×.
   # контейнер: -T — stdout с JSON итога отдельно от stderr; ввод — /dev/null: -p добавляет поданный ввод к промпту,
-  # а открытый ввод контейнера не кончается; --progress quiet — в stderr только ошибки; COMPOSE_IGNORE_ORPHANS убирает строку о контейнерах
-  # основного compose-файла проекта: для claude-box.yml с тем же именем проекта Compose они чужие.
+  # а открытый ввод контейнера не кончается; --progress quiet — в stderr только ошибки и предупреждения. Предупреждение Compose
+  # «a network with name … exists but was not created for project …» о сети проекта в claude-box.yml безвредно, а в хвосте stderr упавшей итерации стоит рядом с причиной.
   # Код выхода claude compose возвращает; на Ctrl+C отдаёт SIGINT сессии и сам выходит с 130, не дожидаясь итога
   if [ -n "$host" ]; then
     CONTEXT_GUARD_MODE=protocol CLAUDE_CODE_PROMPT_CACHE_TTL=5m claude "${args[@]}"
   else
-    COMPOSE_IGNORE_ORPHANS=true docker compose -f "$cf" --progress quiet run --rm -T "${fw[@]}" -e CONTEXT_GUARD_MODE=protocol -e CLAUDE_CODE_PROMPT_CACHE_TTL=5m claude "${args[@]}" </dev/null
+    docker compose -f "$cf" --progress quiet run --rm -T "${fw[@]}" -e CONTEXT_GUARD_MODE=protocol -e CLAUDE_CODE_PROMPT_CACHE_TTL=5m claude "${args[@]}" </dev/null
   fi >"$tmp/out" 2>"$tmp/err"
   code=$?
   kill "$timer" 2>/dev/null
