@@ -1,5 +1,8 @@
 # Claude Code в контейнере, файл этой машины под .gitignore проекта: docker compose -f claude-box.yml run --rm claude [флаги claude]
-# строка name: основного compose-файла проекта — та же здесь, над services: с одним именем проекта Compose Claude в сети сервисов проекта, база доступна по имени сервиса
+# <проект> ниже — имя проекта Compose основного compose-файла проекта: его строка name:, без неё и без файла — имя папки; подставляет /box-init.
+# Своё имя проекта Compose — <проект>-claude: запуск Claude сверяет с этим файлом только ресурсы проекта Claude, контейнеры и сети основного compose-файла остаются как есть,
+# и --remove-orphans в запуске Claude базу проекта оставляет.
+name: <проект>-claude
 services:
   claude:
     image: maksim44/claude-box
@@ -14,17 +17,26 @@ services:
     environment:
       ANTHROPIC_MODEL: opus
     # .env проекта читает скрипт запуска и отдаёт переменные Claude Code; строка env_file отдаёт их и части запуска от root: PATH или LD_PRELOAD из .env выполнят программу агента с правами root
-    # папка проекта — под своим именем: сессии, автопамять и доверие Claude Code в общей домашней папке привязаны к пути
-    working_dir: /workspace/${COMPOSE_PROJECT_NAME}
+    # папка проекта — /workspace/<проект>, явной строкой, тот же путь, что у box-connect: сессии, автопамять и доверие Claude Code в общей домашней папке привязаны к пути
+    working_dir: /workspace/<проект>
     volumes:
-      - .:/workspace/${COMPOSE_PROJECT_NAME}
+      - .:/workspace/<проект>
       # только на чтение поверх папки проекта: этот файл задаёт контейнер следующего запуска, настройки и хуки git выполняет git хоста, строка списка исключений .git/info/exclude прячет файл от git без следа в файлах проекта — её дописывает человек на хосте
-      - ./claude-box.yml:/workspace/${COMPOSE_PROJECT_NAME}/claude-box.yml:ro
+      - ./claude-box.yml:/workspace/<проект>/claude-box.yml:ro
       # в дополнительной рабочей копии git (.git — файл со строкой gitdir:) на месте трёх строк ниже — .git основного репозитория по его абсолютному пути и поверх только на чтение его config, hooks, info; их пишет /box-init
-      - ./.git/config:/workspace/${COMPOSE_PROJECT_NAME}/.git/config:ro
-      - ./.git/hooks:/workspace/${COMPOSE_PROJECT_NAME}/.git/hooks:ro
-      - ./.git/info:/workspace/${COMPOSE_PROJECT_NAME}/.git/info:ro
+      - ./.git/config:/workspace/<проект>/.git/config:ro
+      - ./.git/hooks:/workspace/<проект>/.git/hooks:ro
+      - ./.git/info:/workspace/<проект>/.git/info:ro
       # домашняя папка контейнера, общая для всех проектов машины: логин, история сессий, сам Claude Code
       - ~/.claude-box:/home/node
       # домашняя папка хоста, только на чтение: скрипт запуска берёт оттуда CLAUDE.md, хуки, строку состояния, настройки и .gitconfig — что найдёт; агенту она закрыта
       - ~:/root/host-home:ro
+# сеть по умолчанию — сеть проекта: Claude в сети сервисов основного compose-файла, база доступна по имени сервиса.
+# Блок /box-init берёт целиком из основного compose-файла — networks: default: с именем и настройками; у сети без своего имени — name: <проект>_default, имя от Compose; у проекта без compose-файла блока нет.
+# Нет сети — запуск Claude создаёт её по этому блоку, есть — входит в неё; проект, поднятый после Claude, встаёт в ту же сеть с настройками блока.
+# Проект сменил настройки сети в основном файле — блок отстаёт до повторного /box-init.
+# Запуск Claude в сеть проекта — и запуск проекта в сеть, созданную Claude, — печатает «a network with name … exists but was not created for project …»
+# с советом external: true: предупреждение безвредно, а внешнюю сеть Compose не создаёт, и Claude без поднятого проекта не стартует.
+networks:
+  default:
+    name: <проект>_default
