@@ -10,7 +10,8 @@
 
 ```bash
 CONTEXT_GUARD_MODE=protocol CLAUDE_CODE_PROMPT_CACHE_TTL=5m claude -p "/box-next <задача>" --session-id <uuid> \
-  --permission-mode auto --permission-prompts none --output-format json --max-turns 200
+  --permission-mode auto --permission-prompts none --append-system-prompt "<строка итерации>" \
+  --output-format json --max-turns 200
 ```
 
 Строка итерации в контейнере — тот же запуск через сервис проекта, через точку входа ограничения сети и в bypass:
@@ -18,7 +19,8 @@ CONTEXT_GUARD_MODE=protocol CLAUDE_CODE_PROMPT_CACHE_TTL=5m claude -p "/box-next
 ```bash
 docker compose -f claude-box.yml --progress quiet run --rm -T --entrypoint claude-box-firewall \
   -e CONTEXT_GUARD_MODE=protocol -e CLAUDE_CODE_PROMPT_CACHE_TTL=5m claude -p "/box-next <задача>" --session-id <uuid> \
-  --permission-mode bypassPermissions --permission-prompts none --output-format json --max-turns 200 </dev/null
+  --permission-mode bypassPermissions --permission-prompts none --append-system-prompt "<строка итерации>" \
+  --output-format json --max-turns 200 </dev/null
 ```
 
 С `--no-firewall` — без `--entrypoint` и с `--permission-mode auto`. Флаги после имени сервиса уходят в Claude Code. Образ, собранный до ограничения сети, точки входа `claude-box-firewall` не несёт: контейнер не стартует, итерация падает, и движок останавливается — bypass без ограничения сети не запускается. Поведение Compose 5.6.0 по пробам 2026-10-03:
@@ -38,6 +40,7 @@ docker compose -f claude-box.yml --progress quiet run --rm -T --entrypoint claud
 - `/box-next <задача>` в промпте `-p` раскрывается до запуска и при `disable-model-invocation: true`: тело скилла с подставленным именем задачи приходит первым сообщением сессии.
 - `-p` стартует в Manual; сессия без загрузки флагов функций с сервера — сторонний провайдер, выключенная телеметрия — с CLI 2.1.285 стартует в auto. Режим разрешений передаётся явно при каждом запуске (`container.md` § Ступени изоляции).
 - `--permission-prompts none` (CLI ≥ 2.1.259): запрос, который ждал бы ответа человека, получает отказ с указанием его не повторять, инструменты вопроса пользователю убраны, прогон продолжается — отказ ведёт сессию к блокеру.
+- `--append-system-prompt` — строка итерации в конце системного промпта: сессия — итерация движка, человека рядом нет, последнее сообщение никто не читает; вопрос, просьба сделать руками и отклонённая команда — блокером (`docs/PROTOCOL.md` § Таск-файлы). Тело `/box-next` у итерации и у интерактивной сессии одно, и по нему сессия своего места не знает: в пилотном проекте 2026-11-11 пять итераций из шести на шаге с выкладкой на прод писали вопросы и просьбу о пуше последним сообщением со статусом «в работе» — «напиши „дальше“, сессию не закрывай», — и движок дважды встал на трёх итерациях без прогресса.
 - `--output-format json` — один JSON-объект на stdout: `session_id`, `is_error`, `subtype`, `terminal_reason`, `num_turns`, `total_cost_usd`, `permission_denials`; итоговый текст `result` — у дошедшей до ответа сессии, текст ошибки — в `result` или массиве `errors`. Исходы по пробам:
   - штатное завершение — код 0, `is_error: false`, `subtype: success`, `terminal_reason: completed`;
   - упор в `--max-turns` — код 1, `is_error: true`, `subtype: error_max_turns`, `terminal_reason: max_turns`, `result` нет;
