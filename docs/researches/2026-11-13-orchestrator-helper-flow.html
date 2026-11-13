@@ -1,0 +1,464 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Схема работы оркестратора · agent-box</title>
+<style>
+:root {
+  --bg: #f5f6f8; --surface: #ffffff; --fg: #1b1f27; --muted: #586070; --line: #d4d9e1;
+  --run: #1f50b5; --run-bg: #e2eafa; --wait: #8a5100; --wait-bg: #fcefd5;
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #12151a; --surface: #1a1e25; --fg: #e5e8ee; --muted: #9ba3b1; --line: #333a46;
+    --run: #93b4ff; --run-bg: #1a2846; --wait: #f0b54a; --wait-bg: #382a10;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #12151a; --surface: #1a1e25; --fg: #e5e8ee; --muted: #9ba3b1; --line: #333a46;
+  --run: #93b4ff; --run-bg: #1a2846; --wait: #f0b54a; --wait-bg: #382a10;
+  color-scheme: dark;
+}
+html { scroll-behavior: smooth; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 var(--font); }
+.page { max-width: 72rem; margin-inline: auto; padding: 20px 16px 64px; display: grid; gap: 32px; }
+section { display: grid; gap: 12px; min-width: 0; scroll-margin-top: 16px; }
+h1 { font-size: 1.5rem; line-height: 1.2; margin: 0; }
+h2 { font-size: 1.125rem; line-height: 1.3; margin: 0; }
+h3 { font-size: .9375rem; margin: 8px 0 0; }
+p, ul, ol { margin: 0; }
+p { max-width: 46rem; }
+.muted { color: var(--muted); }
+code { font-family: var(--mono); font-size: .875em; overflow-wrap: anywhere; }
+a { color: var(--fg); }
+.head { display: grid; gap: 8px; }
+.top { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; flex-wrap: wrap; font-size: .8125rem; color: var(--muted); }
+.top button { font: inherit; color: var(--fg); background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px; cursor: pointer; }
+.toc { display: grid; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); gap: 6px; padding: 0; list-style: none; }
+.toc a { display: block; padding: 8px 10px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; text-decoration: none; font-size: .875rem; }
+.ref { display: block; margin-top: 4px; font: .6875rem/1.3 var(--mono); color: var(--muted); }
+.legend { font-size: .8125rem; color: var(--muted); max-width: 46rem; }
+.scroll { overflow-x: auto; padding-bottom: 6px; }
+/* последовательность: столбец — участник, строка — событие */
+.seq { display: grid; grid-template-columns: 1.75rem repeat(var(--lanes), minmax(7.5rem, 1fr)); min-width: 48rem; row-gap: 4px; }
+.lane { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; margin-inline: 3px; }
+.lane-head { padding: 8px 8px 6px; display: grid; gap: 2px; text-align: center; font-size: .8125rem; border-bottom: 1px solid var(--line); margin-inline: 3px; }
+.lane-head span { color: var(--muted); font-size: .75rem; }
+.phase { margin-top: 10px; padding: 4px 8px; font-weight: 600; font-size: .8125rem; background: var(--bg); border-top: 2px solid var(--fg); position: relative; z-index: 1; }
+.num { align-self: center; justify-self: center; width: 1.375rem; height: 1.375rem; border-radius: 50%; background: var(--fg); color: var(--surface); font-size: .6875rem; font-weight: 700; display: grid; place-items: center; }
+.act { margin: 2px 8px; padding: 6px 8px; background: var(--bg); border: 1px solid var(--fg); border-radius: 6px; font-size: .8125rem; line-height: 1.35; align-self: center; }
+.note { margin: 2px 8px; padding: 6px 10px; border: 1px dashed var(--muted); border-radius: 6px; font-size: .8125rem; background: var(--bg); align-self: center; }
+.msg { display: grid; align-content: center; padding: 2px 8px; font-size: .8125rem; line-height: 1.35; text-align: center; }
+.msg .line { display: block; height: 0; border-top: 2px solid var(--fg); position: relative; margin: 4px calc(50% / var(--span) - 8px * (1 - 1 / var(--span))); }
+.msg .line::before { content: ""; position: absolute; top: -5px; width: 8px; height: 8px; border-radius: 50%; background: var(--fg); }
+.msg .line::after { content: ""; position: absolute; top: -7px; border: 6px solid transparent; }
+.msg.to-r .line::before { left: -4px; }
+.msg.to-r .line::after { right: -2px; border-left: 10px solid var(--fg); border-right: 0; }
+.msg.to-l .line::before { right: -4px; }
+.msg.to-l .line::after { left: -2px; border-right: 10px solid var(--fg); border-left: 0; }
+.msg-text, .msg .ref { justify-self: center; padding-inline: 4px; background: var(--surface); position: relative; }
+.msg .ref { margin-top: 0; }
+/* дерево вызовов */
+.tree ul { list-style: none; margin: 0; padding: 0; }
+.tree ul ul { margin-left: 12px; padding-left: 18px; border-left: 1px solid var(--line); }
+.tree li { position: relative; padding: 4px 0; }
+.tree ul ul > li::before { content: ""; position: absolute; left: -18px; top: 18px; width: 14px; border-top: 1px solid var(--line); }
+.node { display: inline-block; max-width: 46rem; background: var(--surface); border: 1px solid var(--fg); border-radius: 6px; padding: 6px 10px; font-size: .875rem; }
+/* развилки */
+.fan { display: grid; gap: 0; }
+.fan-head { justify-self: start; background: var(--fg); color: var(--surface); border-radius: 6px; padding: 6px 12px; font-weight: 600; font-size: .875rem; }
+.fan-head .ref { color: var(--surface); opacity: .75; }
+.fan-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); gap: 8px; border-left: 2px solid var(--fg); margin-left: 16px; padding: 12px 0 0 14px; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; display: grid; gap: 4px; font-size: .875rem; position: relative; }
+.card b { font-weight: 600; }
+.two { display: grid; grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr)); gap: 12px; }
+.box { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; display: grid; gap: 6px; font-size: .875rem; }
+.box ul { padding-left: 18px; display: grid; gap: 4px; }
+.box.wait { border-color: var(--wait); }
+.box.wait h3 { color: var(--wait); }
+.box.run { border-color: var(--run); }
+.box.run h3 { color: var(--run); }
+.box h3 { margin: 0; }
+/* поток сверху вниз */
+.flow { list-style: none; padding: 0; display: grid; max-width: 52rem; }
+.fstep { display: grid; grid-template-columns: 1.75rem 1fr; gap: 10px; background: var(--surface); border: 1px solid var(--fg); border-radius: 8px; padding: 8px 12px 8px 8px; font-size: .875rem; }
+.fstep .n { width: 1.5rem; height: 1.5rem; border-radius: 50%; background: var(--fg); color: var(--surface); font-size: .75rem; font-weight: 700; display: grid; place-items: center; }
+.down { height: 18px; position: relative; }
+.down::before { content: ""; position: absolute; left: 21px; top: 0; height: 12px; border-left: 2px solid var(--fg); }
+.down::after { content: ""; position: absolute; left: 16px; bottom: 0; border: 6px solid transparent; border-top: 8px solid var(--fg); border-bottom: 0; }
+.exits { list-style: none; padding: 0; margin-top: 6px; display: grid; gap: 3px; }
+.exits li { padding-left: 14px; position: relative; color: var(--muted); font-size: .8125rem; }
+.exits li::before { content: "↳"; position: absolute; left: 0; }
+.back { margin-top: 8px; font-size: .8125rem; color: var(--muted); }
+table { border-collapse: collapse; font-size: .875rem; min-width: 40rem; background: var(--surface); }
+th, td { border: 1px solid var(--line); padding: 6px 8px; text-align: left; vertical-align: top; }
+th { background: var(--bg); }
+</style>
+</head>
+<body>
+<main class="page">
+<header class="head">
+<div class="top"><span>Задача orchestrator-helper · 2026-11-13 · по скиллу оркестратора, движку, протоколу и скиллам проекта</span><button id="theme" type="button">Тема: системная</button></div>
+<h1>Как работает оркестратор и всё, что он вызывает</h1>
+<p>Оркестратор — Claude на компьютере, который ведёт задачу проекта до «готово». Сам шаги он не делает: их делают итерации — сессии Claude, которые по очереди запускает движок. Оркестратор будит движок, разбирает его остановки, снимает вопросы проверкой, остальные приносит пользователю и показывает ход на странице задачи.</p>
+<p class="legend">Схема — по текстам до шага правок по находкам полной проверки.</p>
+<ul class="toc"><li><a href="#seq">Ход задачи целиком</a></li><li><a href="#tree">Что оркестратор вызывает</a></li><li><a href="#wake">Что будит оркестратор</a></li><li><a href="#block">Вопрос блокера</a></li><li><a href="#hands">Просьба сделать руками</a></li><li><a href="#fail">Сбой и остановки</a></li><li><a href="#chat">Слова пользователя в чате</a></li><li><a href="#engine">Движок изнутри</a></li><li><a href="#iter">Итерация изнутри</a></li><li><a href="#box">Контейнер итерации</a></li><li><a href="#page">Страница задачи</a></li><li><a href="#limits">Что оркестратор делает сам и что отдаёт</a></li><li><a href="#wait">Где оркестратор ждёт пользователя</a></li><li><a href="#life">Вокруг оркестратора</a></li></ul>
+</header>
+<section id="seq"><h2>Ход задачи целиком</h2><p>Задача от вызова оркестратора до «готово»: шаг, вопрос, ответ, итог. Столбец — участник, строка — событие по порядку.</p>
+<p class="legend">Стрелка — вызов или сообщение: над ней — что передаётся, под ней — где это записано. Плашка — действие внутри участника. «Скилл» — скилл оркестратора <code>box-orchestrate/SKILL.md</code>, «движок» — <code>agent-loop.sh</code>, «протокол» — <code>docs/PROTOCOL.md</code>. На телефоне схема листается вбок.</p>
+<div class="scroll"><div class="seq" style="--lanes:6">
+<div class="lane" style="grid-column:2;grid-row:1 / span 44"></div>
+<div class="lane-head" style="grid-column:2;grid-row:1"><b>Пользователь</b><span>терминал, чат, телефон</span></div>
+<div class="lane" style="grid-column:3;grid-row:1 / span 44"></div>
+<div class="lane-head" style="grid-column:3;grid-row:1"><b>Оркестратор</b><span>Claude на компьютере, <code>/box-orchestrate</code></span></div>
+<div class="lane" style="grid-column:4;grid-row:1 / span 44"></div>
+<div class="lane-head" style="grid-column:4;grid-row:1"><b>Агент проверок</b><span>подагент оркестратора</span></div>
+<div class="lane" style="grid-column:5;grid-row:1 / span 44"></div>
+<div class="lane-head" style="grid-column:5;grid-row:1"><b>Страница задачи</b><span>скрипт <code>page.py</code> и claude.ai</span></div>
+<div class="lane" style="grid-column:6;grid-row:1 / span 44"></div>
+<div class="lane-head" style="grid-column:6;grid-row:1"><b>Движок и сторож</b><span><code>agent-loop.sh</code>, фоновые команды</span></div>
+<div class="lane" style="grid-column:7;grid-row:1 / span 44"></div>
+<div class="lane-head" style="grid-column:7;grid-row:1"><b>Итерация</b><span>сессия Claude <code>/box-next</code></span></div>
+<div class="phase" style="grid-row:2;grid-column:1 / span 7">Старт</div>
+<div class="num" style="grid-row:3;grid-column:1">1</div>
+<div class="msg to-r" style="grid-row:3;grid-column:2 / span 2;--span:2"><span class="msg-text"><code>/box-orchestrate &lt;задача&gt;</code>; слово <code>telegram</code> — уведомления в Telegram, <code>--host</code> — итерации на компьютере</span><span class="line"></span><span class="ref">скилл, шаг 1</span></div>
+<div class="num" style="grid-row:4;grid-column:1">2</div>
+<div class="act" style="grid-row:4;grid-column:3">Имени задачи нет — окно выбора: до трёх задач первой вехи<span class="ref">скилл, шаг 1</span></div>
+<div class="num" style="grid-row:5;grid-column:1">3</div>
+<div class="act" style="grid-row:5;grid-column:3">Модель агента проверок — из <code>config.yml</code> agent-box<span class="ref">скилл, шаг 1</span></div>
+<div class="num" style="grid-row:6;grid-column:1">4</div>
+<div class="act" style="grid-row:6;grid-column:3">Сверка перед запуском: вопрос без ответа, правки без коммита, занятость своего контекста<span class="ref">скилл, шаг 2</span></div>
+<div class="num" style="grid-row:7;grid-column:1">5</div>
+<div class="msg to-r" style="grid-row:7;grid-column:3 / span 4;--span:4"><span class="msg-text">Две фоновые команды: сторож журнала цикла, затем движок</span><span class="line"></span><span class="ref">скилл, шаг 2</span></div>
+<div class="phase" style="grid-row:8;grid-column:1 / span 7">Шаг задачи</div>
+<div class="num" style="grid-row:9;grid-column:1">6</div>
+<div class="msg to-r" style="grid-row:9;grid-column:6 / span 2;--span:2"><span class="msg-text">Новая сессия Claude: <code>/box-next &lt;задача&gt;</code>; в контейнере — сеть по списку адресов</span><span class="line"></span><span class="ref">движок</span></div>
+<div class="num" style="grid-row:10;grid-column:1">7</div>
+<div class="msg to-l" style="grid-row:10;grid-column:3 / span 4;--span:4"><span class="msg-text">Сторож увидел в журнале цикла начало итерации и вышел — оркестратор проснулся</span><span class="line"></span><span class="ref">скилл, шаги 2–3</span></div>
+<div class="num" style="grid-row:11;grid-column:1">8</div>
+<div class="msg to-r" style="grid-row:11;grid-column:3 / span 3;--span:3"><span class="msg-text">Команда <code>iteration</code>: что закрыла прошлая итерация, на какой шаг идёт новая</span><span class="line"></span><span class="ref">скилл, шаг 7</span></div>
+<div class="num" style="grid-row:12;grid-column:1">9</div>
+<div class="msg to-l" style="grid-row:12;grid-column:3 / span 3;--span:3"><span class="msg-text">Ответ скрипта — одна строка: адрес страницы, файлы кадров</span><span class="line"></span><span class="ref">скилл, шаг 7</span></div>
+<div class="num" style="grid-row:13;grid-column:1">10</div>
+<div class="msg to-r" style="grid-row:13;grid-column:3 / span 3;--span:3"><span class="msg-text">Публикация на claude.ai инструментом <code>Artifact</code></span><span class="line"></span><span class="ref">скилл, шаг 7</span></div>
+<div class="num" style="grid-row:14;grid-column:1">11</div>
+<div class="msg to-l" style="grid-row:14;grid-column:2 / span 2;--span:2"><span class="msg-text">Та же фраза в чат; на первом адресе — ссылка на страницу</span><span class="line"></span><span class="ref">скилл, шаг 7</span></div>
+<div class="num" style="grid-row:15;grid-column:1">12</div>
+<div class="act" style="grid-row:15;grid-column:7">Один шаг очереди — первый незакрытый чекбокс «Постановки»<span class="ref">/box-next, шаг 3</span></div>
+<div class="num" style="grid-row:16;grid-column:1">13</div>
+<div class="act" style="grid-row:16;grid-column:7">Завершение: результат, реестр решений, таск-файл, коммит; журнал — на «готово»<span class="ref">протокол § Протокол сессии</span></div>
+<div class="num" style="grid-row:17;grid-column:1">14</div>
+<div class="msg to-l" style="grid-row:17;grid-column:6 / span 2;--span:2"><span class="msg-text">Сессия кончилась: итог JSON, статус в таск-файле</span><span class="line"></span><span class="ref">движок</span></div>
+<div class="num" style="grid-row:18;grid-column:1">15</div>
+<div class="act" style="grid-row:18;grid-column:6">Упала ли сессия, остались ли правки без коммита, был ли прогресс; статус «в работе» — пауза и следующая итерация<span class="ref">движок</span></div>
+<div class="num" style="grid-row:19;grid-column:1">16</div>
+<div class="note" style="grid-row:19;grid-column:2 / span 6">Так итерации идут, пока статус «в работе»: предел итераций за запуск — <code>max_iterations</code>, итераций подряд без прогресса — <code>max_idle_iterations</code> из <code>config.yml</code>. Каждая новая итерация снова будит оркестратор через сторожа.<span class="ref">движок, config.yml</span></div>
+<div class="phase" style="grid-row:20;grid-column:1 / span 7">Вопрос</div>
+<div class="num" style="grid-row:21;grid-column:1">17</div>
+<div class="act" style="grid-row:21;grid-column:7">Шаг упёрся в вопрос: секция «Блокер» в таск-файле, статус «блокер»<span class="ref">протокол § Таск-файлы</span></div>
+<div class="num" style="grid-row:22;grid-column:1">18</div>
+<div class="msg to-l" style="grid-row:22;grid-column:3 / span 4;--span:4"><span class="msg-text">Движок вышел: код 1, «блокер»</span><span class="line"></span><span class="ref">скилл, шаг 3</span></div>
+<div class="num" style="grid-row:23;grid-column:1">19</div>
+<div class="msg to-l" style="grid-row:23;grid-column:2 / span 5;--span:5"><span class="msg-text">Уведомление в Telegram с текстом блокера — только со словом <code>telegram</code></span><span class="line"></span><span class="ref">движок</span></div>
+<div class="num" style="grid-row:24;grid-column:1">20</div>
+<div class="act" style="grid-row:24;grid-column:3">Каждый вопрос — в группу: снимает проверка или решает пользователь<span class="ref">скилл, шаг 4</span></div>
+<div class="num" style="grid-row:25;grid-column:1">21</div>
+<div class="msg to-r" style="grid-row:25;grid-column:3 / span 2;--span:2"><span class="msg-text">Вопрос и предложение сессии; агент на каждый вопрос первой группы</span><span class="line"></span><span class="ref">скилл, шаг 4</span></div>
+<div class="num" style="grid-row:26;grid-column:1">22</div>
+<div class="act" style="grid-row:26;grid-column:4">Читает код, документы, git, интернет; запускает команды и тесты; ход — в <code>my_local/checks/</code><span class="ref">скилл, шаг 4</span></div>
+<div class="num" style="grid-row:27;grid-column:1">23</div>
+<div class="msg to-l" style="grid-row:27;grid-column:3 / span 2;--span:2"><span class="msg-text">Абзац: что проверено, итог, источник</span><span class="line"></span><span class="ref">скилл, шаг 4</span></div>
+<div class="num" style="grid-row:28;grid-column:1">24</div>
+<div class="act" style="grid-row:28;grid-column:3">Ответ на вопрос первой группы — строка <code>ответ: оркестратор —</code> в секции «Блокер»<span class="ref">скилл, шаг 4</span></div>
+<div class="num" style="grid-row:29;grid-column:1">25</div>
+<div class="msg to-r" style="grid-row:29;grid-column:3 / span 3;--span:3"><span class="msg-text">Команда <code>question</code>: вопрос, варианты, схема мест у шагов руками; публикация</span><span class="line"></span><span class="ref">скилл, шаги 4 и 7; questions.md</span></div>
+<div class="num" style="grid-row:30;grid-column:1">26</div>
+<div class="msg to-l" style="grid-row:30;grid-column:2 / span 2;--span:2"><span class="msg-text">Сообщение: ссылка, что решается, что будет после каждого варианта</span><span class="line"></span><span class="ref">скилл, шаг 4</span></div>
+<div class="num" style="grid-row:31;grid-column:1">27</div>
+<div class="msg to-l" style="grid-row:31;grid-column:2 / span 2;--span:2"><span class="msg-text">Пуш на телефон: ждёт решения</span><span class="line"></span><span class="ref">скилл, шаг 4</span></div>
+<div class="num" style="grid-row:32;grid-column:1">28</div>
+<div class="msg to-l" style="grid-row:32;grid-column:2 / span 2;--span:2"><span class="msg-text">Окно вопроса: до четырёх вопросов, у каждого варианты</span><span class="line"></span><span class="ref">скилл, шаг 4</span></div>
+<div class="num" style="grid-row:33;grid-column:1">29</div>
+<div class="msg to-r" style="grid-row:33;grid-column:2 / span 2;--span:2"><span class="msg-text">Выбор варианта или свои слова</span><span class="line"></span><span class="ref">скилл, шаг 4</span></div>
+<div class="num" style="grid-row:34;grid-column:1">30</div>
+<div class="act" style="grid-row:34;grid-column:3">Ответы — строками <code>ответ:</code> в секцию «Блокер»; возражение — «нет» той части<span class="ref">скилл, шаг 4</span></div>
+<div class="num" style="grid-row:35;grid-column:1">31</div>
+<div class="msg to-r" style="grid-row:35;grid-column:3 / span 3;--span:3"><span class="msg-text">Команда <code>answer</code>: блок «Ждёт решения» уходит в «Вопросы и ответы»</span><span class="line"></span><span class="ref">скилл, шаг 7</span></div>
+<div class="num" style="grid-row:36;grid-column:1">32</div>
+<div class="msg to-r" style="grid-row:36;grid-column:3 / span 4;--span:4"><span class="msg-text">Перезапуск: движок находит ответ и ставит статус «в работе»</span><span class="line"></span><span class="ref">скилл, шаг 2; движок</span></div>
+<div class="num" style="grid-row:37;grid-column:1">33</div>
+<div class="msg to-r" style="grid-row:37;grid-column:6 / span 2;--span:2"><span class="msg-text">Новая итерация переносит ответ в реестр решений и стирает секцию</span><span class="line"></span><span class="ref">протокол § Таск-файлы</span></div>
+<div class="phase" style="grid-row:38;grid-column:1 / span 7">Готово</div>
+<div class="num" style="grid-row:39;grid-column:1">34</div>
+<div class="act" style="grid-row:39;grid-column:7">Последний чекбокс закрыт: статус «готово», запись журнала<span class="ref">протокол § Статус «готово»</span></div>
+<div class="num" style="grid-row:40;grid-column:1">35</div>
+<div class="msg to-l" style="grid-row:40;grid-column:3 / span 4;--span:4"><span class="msg-text">Движок вышел: код 0, «готово»</span><span class="line"></span><span class="ref">скилл, шаг 3</span></div>
+<div class="num" style="grid-row:41;grid-column:1">36</div>
+<div class="msg to-r" style="grid-row:41;grid-column:3 / span 3;--span:3"><span class="msg-text">Команда <code>done</code>: что задача дала; публикация</span><span class="line"></span><span class="ref">скилл, шаг 6</span></div>
+<div class="num" style="grid-row:42;grid-column:1">37</div>
+<div class="msg to-l" style="grid-row:42;grid-column:2 / span 2;--span:2"><span class="msg-text">Итог одним сообщением: итерации, кто отвечал, предложения сессий текстом, ссылка; пуш</span><span class="line"></span><span class="ref">скилл, шаги 6 и 9</span></div>
+<div class="num" style="grid-row:43;grid-column:1">38</div>
+<div class="msg to-l" style="grid-row:43;grid-column:2 / span 2;--span:2"><span class="msg-text">Окно: следующая задача или конец</span><span class="line"></span><span class="ref">скилл, шаг 6</span></div>
+<div class="num" style="grid-row:44;grid-column:1">39</div>
+<div class="msg to-r" style="grid-row:44;grid-column:2 / span 2;--span:2"><span class="msg-text">Новая задача — снова сверка и запуск; конец — ход без текста</span><span class="line"></span><span class="ref">скилл, шаг 6</span></div>
+</div></div>
+</section>
+<section id="tree"><h2>Что оркестратор вызывает</h2><p>Всё, что запускает или читает оркестратор, и что запускают они сами.</p>
+<div class="tree"><ul>
+<li><div class="node"><b>Оркестратор</b> — интерактивная сессия Claude на компьютере в папке проекта; ведёт задачу движком до «готово»<span class="ref">скилл</span></div>
+<ul>
+<li><div class="node"><b>Конфиг agent-box</b> — модель агента проверок <code>check_agent_model</code>; ключа нет — opus<span class="ref">скилл, шаг 1</span></div>
+</li>
+<li><div class="node"><b>Файл переписки своей сессии</b> — занятость контекста перед каждым запуском; от 150 тыс. токенов — стоп и новая сессия<span class="ref">скилл, шаг 2</span></div>
+</li>
+<li><div class="node"><b>Сторож журнала цикла</b> — фоновая команда: выходит на строке начала итерации или алерта таймера в <code>.git/agent-loop.log</code> и будит оркестратор<span class="ref">скилл, шаг 2</span></div>
+</li>
+<li><div class="node"><b>Движок <code>agent-loop.sh</code></b> — фоновая команда в своей группе процессов; выходит на остановке с кодом 0, 1, 2 или 130<span class="ref">скилл, шаг 2; движок</span></div>
+<ul>
+<li><div class="node"><b>Замок и журнал цикла</b> — <code>.git/agent-loop.lock</code> — один цикл на репозиторий; <code>.git/agent-loop.log</code> — запуски, итерации с ходом сессии, остановки<span class="ref">движок</span></div>
+</li>
+<li><div class="node"><b>Telegram</b> — остановки и алерт таймера — с флагом <code>telegram</code> у оркестратора и токеном в <code>~/.config/agent-loop.env</code><span class="ref">движок</span></div>
+</li>
+<li><div class="node"><b>Итерация — сессия Claude</b> — <code>claude -p "/box-next &lt;задача&gt;"</code>; строка в системном промпте: человека рядом нет, вопрос — блокером<span class="ref">движок</span></div>
+<ul>
+<li><div class="node"><b>Контейнер проекта</b> — по умолчанию: сервис <code>claude</code> из <code>claude-box.yml</code>, сеть по списку адресов, без вопросов о разрешениях<span class="ref">движок; claude-box.yml</span></div>
+</li>
+<li><div class="node"><b>Claude на компьютере</b> — с флагом <code>--host</code>: режим auto; нужен браузеру шага QA<span class="ref">движок</span></div>
+</li>
+<li><div class="node"><b><code>/box-next</code> и протокол</b> — один шаг очереди и завершение: реестр решений, таск-файл, коммит, журнал<span class="ref">/box-next; протокол</span></div>
+</li>
+<li><div class="node"><b>Хук context-guard</b> — на пороге контекста — завершение по протоколу молча<span class="ref">протокол § Протокол сессии</span></div>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+<li><div class="node"><b>Агент проверок</b> — инструмент <code>Agent</code>, модель из конфига: вопросы блокера, которые снимает проверка, и сверка с задумкой пользователя<span class="ref">скилл, шаги 4 и 8</span></div>
+<ul>
+<li><div class="node"><b>Файл хода</b> — <code>my_local/checks/&lt;задача&gt;-&lt;n&gt;.md</code> — пункты проверки и место продолжения после обрыва<span class="ref">скилл, шаг 4</span></div>
+</li>
+</ul>
+</li>
+<li><div class="node"><b>Скрипт страницы <code>page.py</code></b> — команды <code>new</code>, <code>iteration</code>, <code>question</code>, <code>answer</code>, <code>stop</code>, <code>done</code>, <code>sent</code>, <code>link</code>; ответ — одна строка<span class="ref">скилл, шаг 7; pages.md</span></div>
+<ul>
+<li><div class="node"><b>Что читает</b> — таск-файл, журнал цикла, сценарии QA <code>docs/qa/&lt;задача&gt;.md</code> и снимки <code>my_local/qa/&lt;задача&gt;/</code>, текст оркестратора<span class="ref">pages.md</span></div>
+</li>
+<li><div class="node"><b>Что пишет</b> — <code>my_local/pages/&lt;задача&gt;.html</code>, картинки и ленты кадров рядом, адреса в <code>my_local/pages/links.md</code><span class="ref">pages.md</span></div>
+</li>
+</ul>
+</li>
+<li><div class="node"><b>Публикация <code>Artifact</code></b> — приватная страница на claude.ai; первый раз — загрузка инструмента <code>ToolSearch</code><span class="ref">скилл, шаг 7</span></div>
+</li>
+<li><div class="node"><b>Окно вопроса <code>AskUserQuestion</code></b> — выбор задачи, вопросы блокера и сбоя, следующая задача<span class="ref">скилл, шаги 1, 4–6</span></div>
+</li>
+<li><div class="node"><b>Пуш <code>PushNotification</code></b> — на «готово», вопрос пользователю, остановку, которую оркестратор не снял сам<span class="ref">скилл, шаг 8</span></div>
+</li>
+<li><div class="node"><b>Фоновый <code>sleep 5</code></b> — сообщение перед окном кончает ход и потому видно; уведомление <code>sleep</code> будит на пуш и окно<span class="ref">скилл, шаг 4</span></div>
+</li>
+<li><div class="node"><b>Остановка движка</b> — Ctrl+C группе процессов по замку — только на прямое «останови»<span class="ref">скилл, шаг 8</span></div>
+</li>
+<li><div class="node"><b>Запись в проект</b> — строки <code>ответ:</code>; коммит по ответу о правках без коммита; правка «Постановки» после «да» — с записью в реестр решений<span class="ref">скилл, шаг 8</span></div>
+</li>
+<li><div class="node"><b>Сервер по ssh</b> — только по явному разрешению на этот заход; команды по одной, вывод — в чат<span class="ref">скилл, шаг 8</span></div>
+</li>
+</ul>
+</li>
+</ul></div>
+</section>
+<section id="wake"><h2>Что будит оркестратор</h2><p>Оркестратор спит, пока идёт движок. Будит его выход сторожа или движка; по исходу он выбирает следующий шаг скилла.</p>
+<div class="fan"><div class="fan-head">Проснулся: что пришло<span class="ref">скилл, шаг 3</span></div><div class="fan-grid">
+<div class="card"><b>Сторож: началась итерация</b><span>→ новый сторож, страница <code>iteration</code> и публикация, та же фраза в чат</span><span class="ref">скилл, шаги 3 и 7</span></div>
+<div class="card"><b>Код 0, «готово»</b><span>→ страница <code>done</code>, итог одним сообщением, вопрос о следующей задаче</span><span class="ref">скилл, шаг 6</span></div>
+<div class="card"><b>Код 0, предел итераций за запуск</b><span>→ перезапуск без вопроса и без пуша</span><span class="ref">скилл, шаг 3</span></div>
+<div class="card"><b>Код 1, блокер</b><span>→ разбор вопросов: проверка или решение пользователя</span><span class="ref">скилл, шаг 4</span></div>
+<div class="card"><b>Код 1: итерация упала, правки без коммита, итерации без прогресса, статус вне протокола</b><span>→ разбор сбоя</span><span class="ref">скилл, шаг 5</span></div>
+<div class="card"><b>Вывод без строки остановки — движок оборван снаружи</b><span>→ разбор сбоя</span><span class="ref">скилл, шаг 5</span></div>
+<div class="card"><b>Сторож на алерте: итерация идёт дольше предела</b><span>→ живой ход в журнале — ожидание; иначе разбор сбоя</span><span class="ref">скилл, шаг 5</span></div>
+<div class="card"><b>Код 2 — движок не запустился</b><span>→ вопрос пользователю: причина из вывода движка</span><span class="ref">скилл, шаг 3</span></div>
+<div class="card"><b>Код 130 — остановка по «останови»</b><span>→ итог пользователю; перезапуск — по его слову</span><span class="ref">скилл, шаги 3 и 8</span></div>
+</div></div>
+</section>
+<section id="block"><h2>Вопрос блокера</h2><p>Итерация остановилась на вопросе. Оркестратор делит вопросы на две группы до того, как спросить пользователя.</p>
+<div class="two"><div class="box run"><h3>Снимает проверка — агент проверок</h3><p>команда, тест; чтение кода, документов, ресерчей, истории git; запрос к локальной базе и запись её данных; осмотр контейнеров проекта; поиск в интернете и документации; чтение консоли площадки; публичное значение из сервиса — в файл вне git</p><span class="ref">скилл, шаг 4</span></div><div class="box wait"><h3>Решает пользователь — окно вопроса</h3><p>выбор между вариантами с разными последствиями; согласие на очередь шагов; цель и способ проверки; дело руками за границей оркестратора: миграция, compose-файл, настройки Claude Code, вход в сервис, сервер без разрешения на ssh; граница неясна</p><span class="ref">скилл, шаг 4</span></div></div>
+<h3>Агент проверок</h3><ol class="flow">
+<li class="fstep"><span class="n">1</span><div>Задание: вопрос и предложение сессии, файл хода <code>my_local/checks/&lt;задача&gt;-&lt;n&gt;.md</code>; агенты нескольких вопросов — разом, поднимающие сервер или тесты на базе — по очереди<span class="ref">скилл, шаг 4</span></div></li>
+<li class="down" aria-hidden="true"></li>
+<li class="fstep"><span class="n">2</span><div>Проверка: читает код, документы, ресерчи, git, консоли площадок; запускает команды и тесты; ищет в интернете; пишет только файл хода и публичное значение в файл вне git<ul class="exits"><li>миграций не запускает, окружение — только по точным именам переменных</li></ul><span class="ref">скилл, шаг 4</span></div></li>
+<li class="down" aria-hidden="true"></li>
+<li class="fstep"><span class="n">3</span><div>Абзац оркестратору: что проверено, итог, источник<ul class="exits"><li>итог однозначен → строка <code>ответ: оркестратор —</code></li><li>итог неоднозначен → вопрос пользователю, абзац — тем, что уже проверено</li><li>отчёт без итога по всем пунктам — обрыв → следующий агент продолжает по файлу хода</li><li>два обрыва подряд без новых пунктов → вопрос пользователю</li></ul><span class="ref">скилл, шаг 4</span></div></li>
+</ol><h3>Вопрос пользователю — по порядку</h3><ol class="flow">
+<li class="fstep"><span class="n">1</span><div>Страница: команда <code>question</code> и публикация; у шагов руками — поле <code>hands</code>, страница рисует схему мест<span class="ref">скилл, шаги 4 и 7; questions.md</span></div></li>
+<li class="down" aria-hidden="true"></li>
+<li class="fstep"><span class="n">2</span><div>Фоновый <code>sleep 5</code>, затем сообщение в чат текстом, которым кончается ход: первая строка — ссылка; что решается и что будет после каждого варианта; ответы оркестратора на другие вопросы<span class="ref">скилл, шаг 4</span></div></li>
+<li class="down" aria-hidden="true"></li>
+<li class="fstep"><span class="n">3</span><div>Уведомление <code>sleep</code> будит оркестратор — пуш <code>PushNotification</code><span class="ref">скилл, шаг 4</span></div></li>
+<li class="down" aria-hidden="true"></li>
+<li class="fstep"><span class="n">4</span><div>Окно <code>AskUserQuestion</code>: вопрос и варианты — слово в слово те же, что на странице<span class="ref">скилл, шаг 4</span></div></li>
+<li class="down" aria-hidden="true"></li>
+<li class="fstep"><span class="n">5</span><div>Ответ — сразу строкой в секцию «Блокер»: выбранный вариант — его текстом, свой ответ — дословно; согласие и возражение против части — «&lt;вариант&gt;, кроме &lt;часть&gt;: «&lt;возражение&gt;»»<ul class="exits"><li>вопрос, недовольство, «смотри сам», пересказ «похоже, согласен» — не ответ: вопрос открыт</li><li>неясно, ответ ли, — один вопрос его же словами: записать ли ответом</li></ul><span class="ref">скилл, шаг 4</span></div></li>
+<li class="down" aria-hidden="true"></li>
+<li class="fstep"><span class="n">6</span><div>Ответ есть на каждый вопрос — команда <code>answer</code> и перезапуск движка<span class="ref">скилл, шаги 4 и 7</span></div></li>
+</ol>
+</section>
+<section id="hands"><h2>Просьба сделать руками</h2><p>Сессия в контейнере пишет просьбу шагами: одно место, одно дело. Оркестратор раскладывает шаги на три корзины и отдаёт пользователю только то, чего не может сам.</p>
+<div class="fan"><div class="fan-head">Шаг просьбы<span class="ref">скилл, шаг 4</span></div><div class="fan-grid">
+<div class="card"><b>Шаг-проверка</b><span>→ агенту проверок; проверка «до» — до шага пользователя, «после» — по присланному</span><span class="ref">скилл, шаг 4</span></div>
+<div class="card"><b>Шаг-действие в границах оркестратора</b><span>→ оркестратор делает сам, итог — строкой в чат</span><span class="ref">скилл, шаги 4 и 8</span></div>
+<div class="card"><b>Остальные шаги</b><span>→ пользователю по одному: «Шаг N из M — место», вход, команды <code>! &lt;команда&gt;</code>, что прислать</span><span class="ref">скилл, шаг 4; протокол § Сообщения пользователю</span></div>
+</div></div><ol class="flow">
+<li class="fstep"><span class="n">1</span><div>Страница с полем <code>hands</code> — схема мест — и публикация<span class="ref">скилл, шаг 4; questions.md § Текст команды <code>question</code></span></div></li>
+<li class="down" aria-hidden="true"></li>
+<li class="fstep"><span class="n">2</span><div>Сообщение: сколько шагов и где; первой строкой — ссылка на страницу. Затем «Шаг 1 из M — место», вход, команды, что прислать; пуш<span class="ref">скилл, шаг 4</span></div></li>
+<li class="down" aria-hidden="true"></li>
+<li class="fstep"><span class="n">3</span><div>Пользователь присылает вывод — оркестратор проверяет: сошлось — следующий шаг, нет — строка, что не так, и шаг починки<span class="ref">скилл, шаг 4</span></div></li>
+<li class="down" aria-hidden="true"></li>
+<li class="fstep"><span class="n">4</span><div>После последнего шага — окно «сделано ли»; итог сделанного проверяет агент проверок, строка <code>ответ: оркестратор —</code> — рядом со строкой пользователя<span class="ref">скилл, шаг 4</span></div></li>
+</ol>
+</section>
+<section id="fail"><h2>Сбой и остановки</h2><p>Движок вышел не на «готово» и не на вопросе. Оркестратор разбирает журнал цикла, <code>git status</code> и «Контекст».</p>
+<div class="fan"><div class="fan-head">Сбой: что видно<span class="ref">скилл, шаг 5</span></div><div class="fan-grid">
+<div class="card"><b>Сбой сети или API</b><span>→ перезапуск</span><span class="ref">скилл, шаг 5</span></div>
+<div class="card"><b>Лимит подписки</b><span>→ ожидание сброса фоновым <code>sleep</code>, время — из текста ошибки; перезапуск</span><span class="ref">скилл, шаг 5</span></div>
+<div class="card"><b>Шаг длиной в несколько сессий: живой ход, точка продолжения в «Контексте»</b><span>→ перезапуск</span><span class="ref">скилл, шаг 5</span></div>
+<div class="card"><b>Сбой сети, API или лимит оставил правки без коммита</b><span>→ перезапуск с <code>--resume &lt;id&gt;</code>: та же сессия доделывает и коммитит</span><span class="ref">скилл, шаг 5</span></div>
+<div class="card"><b>Прочие правки без коммита</b><span>→ вопрос: принять коммитом или откатить; делает оркестратор по ответу</span><span class="ref">скилл, шаг 5</span></div>
+<div class="card"><b>Остальное</b><span>→ вопрос пользователю: что видно в журнале и что предлагает оркестратор</span><span class="ref">скилл, шаг 5</span></div>
+</div></div><p class="legend">Ответ на вопрос этого шага живёт в беседе и на странице: секции «Блокер» у него нет.</p>
+</section>
+<section id="chat"><h2>Слова пользователя в чате</h2><p>Пользователь пишет между событиями движка. Оркестратор отвечает, а задачу, разошедшуюся с задумкой, останавливает.</p>
+<div class="fan"><div class="fan-head">Пришло сообщение<span class="ref">скилл, шаг 8</span></div><div class="fan-grid">
+<div class="card"><b>Вопрос пользователя в чате</b><span>→ ответ первым же сообщением из известного: свои действия за сессию, таск-файл, журнал цикла, ответы скрипта</span><span class="ref">скилл, шаг 8</span></div>
+<div class="card"><b>«Почему»</b><span>→ первой фразой — причина: правило, решение пользователя или своё действие</span><span class="ref">скилл, шаг 8</span></div>
+<div class="card"><b>«Что происходит»</b><span>→ положение задачи и следующее действие оркестратора; ждёт решения — вопрос ещё раз, ждёт шага — этот шаг ещё раз</span><span class="ref">скилл, шаг 8</span></div>
+<div class="card"><b>Ответа в известном нет</b><span>→ чтение файла с фразой перед ним, что и зачем читается; «не знаю» — после проверки</span><span class="ref">скилл, шаг 8</span></div>
+<div class="card"><b>Пока пользователь ждёт ответа</b><span>→ ни агентов, ни движка: события этого времени — после ответа</span><span class="ref">скилл, шаг 8</span></div>
+<div class="card"><b>«Отменяй», «стоп», «хватит»</b><span>→ вопрос, что отменить; движок идёт до ответа</span><span class="ref">скилл, шаг 8</span></div>
+</div></div><div class="fan"><div class="fan-head">Расхождение с задумкой<span class="ref">скилл, шаг 8</span></div><div class="fan-grid">
+<div class="card"><b>Возражение или вопрос пользователя задевает цель, очередь или макет</b><span>→ движок не запускается; сверку с реестром решений и перепиской ведёт агент проверок</span><span class="ref">скилл, шаг 8</span></div>
+<div class="card"><b>Предложение сессии против решения пользователя без пометки «против решения от &lt;дата&gt;»</b><span>→ то же: остановка и сверка</span><span class="ref">скилл, шаг 8; протокол § Таск-файлы</span></div>
+<div class="card"><b>Сверка показала расхождение</b><span>→ одним вопросом — готовая правка «Постановки»: «сейчас» и «после» с его словами и датой</span><span class="ref">скилл, шаг 8</span></div>
+<div class="card"><b>Пользователь ответил «да» на правку</b><span>→ правка «Постановки», запись в реестр решений, коммит обоих</span><span class="ref">скилл, шаг 8</span></div>
+</div></div>
+</section>
+<section id="engine"><h2>Движок изнутри</h2><p>Скрипт на компьютере: запускает сессии Claude на шаги по очереди и выходит, когда нужен человек или задача готова.</p>
+<ol class="flow">
+<li class="fstep"><span class="n">1</span><div>Старт запуска: флаги <code>--host</code>, <code>--no-firewall</code>, <code>--quiet</code>, <code>--resume &lt;id&gt;</code>; задача и её таск-файл; пределы из <code>config.yml</code>; без <code>--host</code> — файл <code>claude-box.yml</code>; токен Telegram; замок <code>.git/agent-loop.lock</code>; строка запуска в журнал цикла<ul class="exits"><li>нет команды, таск-файла, <code>claude-box.yml</code>, ошибка в конфиге или уже идёт цикл в репозитории → код 2</li></ul><span class="ref">движок</span></div></li>
+<li class="down" aria-hidden="true"></li>
+<li class="fstep"><span class="n">2</span><div>Статус из первой строки таск-файла<ul class="exits"><li>«блокер» без строки <code>ответ:</code> → код 1, уведомление с секцией «Блокер»</li><li>«блокер» со строкой <code>ответ:</code> → статус «в работе» в рабочем дереве, дальше</li><li>«готово» → код 0</li><li>статус вне протокола → код 1</li></ul><span class="ref">движок</span></div></li>
+<li class="down" aria-hidden="true"></li>
+<li class="fstep"><span class="n">3</span><div>Пределы<ul class="exits"><li>итераций подряд без прогресса — <code>max_idle_iterations</code> → код 1</li><li>итераций за запуск — <code>max_iterations</code> → код 0</li></ul><span class="ref">движок; config.yml</span></div></li>
+<li class="down" aria-hidden="true"></li>
+<li class="fstep"><span class="n">4</span><div>Перед итерацией: не первая — пауза <code>pause_seconds</code>; первая в контейнере — проверка сервиса <code>claude</code><ul class="exits"><li>Ctrl+C в паузе → код 130</li><li>сервиса <code>claude</code> нет → код 2</li></ul><span class="ref">движок</span></div></li>
+<li class="down" aria-hidden="true"></li>
+<li class="fstep"><span class="n">5</span><div>Строка начала итерации в журнал: номер, шаг N/M и его начало, id сессии — её ловит сторож оркестратора<span class="ref">движок</span></div></li>
+<li class="down" aria-hidden="true"></li>
+<li class="fstep"><span class="n">6</span><div>Запуск сессии <code>-p "/box-next &lt;задача&gt;"</code> или продолжение по <code>--resume</code>; строка в системный промпт: человека рядом нет; <code>CONTEXT_GUARD_MODE=protocol</code>; потолок ходов <code>max_turns</code>. Где: по умолчанию — контейнер, сеть по списку адресов, без вопросов о разрешениях; <code>--no-firewall</code> — контейнер, сеть открыта, режим auto; <code>--host</code> — Claude на компьютере, режим auto<span class="ref">движок</span></div></li>
+<li class="down" aria-hidden="true"></li>
+<li class="fstep"><span class="n">7</span><div>Пока сессия идёт: её ход из файла истории — в журнал цикла: текст, чтение, правки, команды; через <code>alert_minutes</code> — строка алерта в журнал и Telegram, итерация идёт дальше<span class="ref">движок</span></div></li>
+<li class="down" aria-hidden="true"></li>
+<li class="fstep"><span class="n">8</span><div>Конец сессии: строка конца итерации — длительность, код, исход, статус, коммиты<ul class="exits"><li>Ctrl+C во время итерации → код 130</li><li>нет итога JSON или ошибка сессии → код 1, «упала»</li><li>правки без коммита → код 1</li></ul><span class="ref">движок</span></div></li>
+<li class="down" aria-hidden="true"></li>
+<li class="fstep"><span class="n">9</span><div>Прогресс: закрыт чекбокс или коммиты тронули не только таск-файл, журнал и реестр — счётчик без прогресса обнулён; иначе плюс один<span class="ref">движок</span></div></li>
+<li class="back">↺ после пункта 9 — снова пункт 2</li>
+</ol>
+</section>
+<section id="iter"><h2>Итерация изнутри</h2><p>Одна сессия Claude на один шаг очереди. Человека рядом нет: всё, что нужно от него, идёт секцией «Блокер».</p>
+<ol class="flow">
+<li class="fstep"><span class="n">1</span><div>Старт сессии: хаб проекта <code>CLAUDE.md</code> → <code>AGENTS.md</code> → документы «Чтения на старте»; итерация открывает таск-файл сразу, минуя роадмап<span class="ref">протокол § Протокол сессии</span></div></li>
+<li class="down" aria-hidden="true"></li>
+<li class="fstep"><span class="n">2</span><div>Таск-файл: «блокер» со строкой <code>ответ:</code> → статус «в работе»; статус не «в работе» → конец без правок<span class="ref">/box-next, шаг 2</span></div></li>
+<li class="down" aria-hidden="true"></li>
+<li class="fstep"><span class="n">3</span><div>Один шаг — первый незакрытый чекбокс очереди; недоделанный — от точки в «Контексте»<ul class="exits"><li>вопрос, просьба сделать руками, отклонённая команда, закрытый адрес, сбой среды → секция «Блокер» и статус «блокер»</li></ul><span class="ref">/box-next, шаг 3</span></div></li>
+<li class="down" aria-hidden="true"></li>
+<li class="fstep"><span class="n">4</span><div>Завершение: результат в артефакт; ответы на блокер — в реестр решений, секция стирается; таск-файл — чекбокс по критерию, «Контекст» целиком; коммит; запись журнала — на «готово»<span class="ref">протокол § Протокол сессии; /box-next, шаг 4</span></div></li>
+<li class="down" aria-hidden="true"></li>
+<li class="fstep"><span class="n">5</span><div>Сигнал context-guard на пороге контекста — то же завершение молча; шаг продолжит следующая итерация<span class="ref">протокол § Протокол сессии</span></div></li>
+<li class="down" aria-hidden="true"></li>
+<li class="fstep"><span class="n">6</span><div>Последнее сообщение сессии никто не читает: движок смотрит статус, коммиты и рабочее дерево<span class="ref">движок; /box-next, шаг 5</span></div></li>
+</ol>
+</section>
+<section id="box"><h2>Контейнер итерации</h2><p>По умолчанию итерация идёт в контейнере проекта. С флагом <code>--host</code> этого раздела нет: сессия идёт в Claude на компьютере.</p>
+<ol class="flow">
+<li class="fstep"><span class="n">1</span><div><code>docker compose -f claude-box.yml run --rm -T</code> — сервис <code>claude</code> из файла этой машины, его кладёт <code>/box-init</code>; папка проекта — <code>/workspace/&lt;проект&gt;</code><span class="ref">движок; claude-box.yml</span></div></li>
+<li class="down" aria-hidden="true"></li>
+<li class="fstep"><span class="n">2</span><div>Точка входа <code>claude-box-firewall</code>: исходящая сеть — адреса Claude, npm, PyPI, GitHub и свои адреса проекта из <code>CLAUDE_BOX_ALLOW</code><ul class="exits"><li>закрытый адрес отвечает ошибкой сразу → блокер с просьбой дописать адрес в <code>claude-box.yml</code></li></ul><span class="ref">container/firewall.sh</span></div></li>
+<li class="down" aria-hidden="true"></li>
+<li class="fstep"><span class="n">3</span><div>Скрипт запуска от root: из домашней папки компьютера, подключённой только на чтение, — <code>CLAUDE.md</code>, хуки, <code>.gitconfig</code>; скиллы образа — <code>/box-init</code>, <code>/box-update</code>; настройки образа с хуком context-guard<span class="ref">container/entrypoint.sh</span></div></li>
+<li class="down" aria-hidden="true"></li>
+<li class="fstep"><span class="n">4</span><div>Claude Code — от пользователя <code>node</code> без прав root: правила сети ему не снять; домашняя папка — <code>~/.claude-box</code> компьютера<span class="ref">container/entrypoint.sh</span></div></li>
+<li class="down" aria-hidden="true"></li>
+<li class="fstep"><span class="n">5</span><div>Переменные <code>.env</code> проекта по правилам Compose — в окружение Claude Code<span class="ref">container/env-run.py</span></div></li>
+</ol>
+</section>
+<section id="page"><h2>Страница задачи</h2><p>Оркестратор передаёт скрипту только фразы события; шаги и итерации скрипт берёт сам из таск-файла и журнала цикла. Публикует страницу оркестратор.</p>
+<div class="scroll"><table><thead><tr><th>Событие</th><th>Команда</th><th>Что на странице</th><th>Публикация</th></tr></thead><tbody>
+<tr><td>Началась итерация</td><td><code>iteration</code></td><td>«идёт»; фраза об итерациях</td><td>да</td></tr>
+<tr><td>Вопрос пользователю</td><td><code>question</code></td><td>«ждёт решения»; блок с вариантами, схема мест</td><td>да</td></tr>
+<tr><td>Ответы получены</td><td><code>answer</code></td><td>«стоит»; вопрос уходит в «Вопросы и ответы»</td><td>когда за ответом нет перезапуска</td></tr>
+<tr><td>Остановка без вопроса, предел контекста</td><td><code>stop</code></td><td>«стоит»; что случилось и что дальше</td><td>да</td></tr>
+<tr><td>Готово</td><td><code>done</code></td><td>«готово»; что задача дала</td><td>да; повторы, пока остаются файлы кадров</td></tr>
+<tr><td>Страницы нет, нет меток или появился новый этап — код 3</td><td><code>new</code></td><td>заголовок, лид, цели, пояснения этапов</td><td>после — команда события снова</td></tr>
+<tr><td>Публикация прошла и ответ скрипта просил отметки</td><td><code>sent</code></td><td>файлы кадров отмечены отправленными</td><td>—</td></tr>
+<tr><td>Первая публикация или новый адрес</td><td><code>link</code></td><td>адрес — в <code>my_local/pages/links.md</code></td><td>—</td></tr>
+</tbody></table></div><span class="ref">скилл, шаг 7; pages.md § Метки и откуда данные</span><ol class="flow">
+<li class="fstep"><span class="n">1</span><div>Команда события из корня проекта, текст — со stdin; ответ — строка: файл, части страницы, файлы картинок и кадров, адрес<ul class="exits"><li>код 3 → команда <code>new</code>, затем событие снова</li><li>код 2 → пользователю строка ответа и что страница не обновлена</li></ul><span class="ref">скилл, шаг 7</span></div></li>
+<li class="down" aria-hidden="true"></li>
+<li class="fstep"><span class="n">2</span><div>Публикация <code>Artifact</code> следующим вызовом: адрес есть — с ним, страница у пользователя обновится сама; адреса нет — первая публикация, затем <code>link</code><ul class="exits"><li>отказ «не видел живую версию» → чтение живой страницы целиком и повтор; до трёх вызовов на событие</li><li>инструмента нет → страница живёт только файлом</li></ul><span class="ref">скилл, шаг 7</span></div></li>
+<li class="down" aria-hidden="true"></li>
+<li class="fstep"><span class="n">3</span><div>Ответ скрипта просил отметки — команда <code>sent</code> после удачной публикации<span class="ref">скилл, шаг 7</span></div></li>
+</ol>
+</section>
+<section id="limits"><h2>Что оркестратор делает сам и что отдаёт</h2><p>Граница на всю сессию. Просьба сессии, пересланная целиком, и ответ о намерении вместо дела — срыв.</p>
+<div class="two"><div class="box run"><h3>Делает сам</h3><ul><li>отвечает на вопросы пользователя и выполняет поручения</li><li>проверки — агентом проверок: код, документы, git, тесты, локальная база, интернет, консоли площадок на чтение</li><li>контейнеры и образы проекта: журнал, команды проверки, остановка и удаление поднятых по ошибке</li><li>файлы вне git</li><li>запуск, перезапуск и остановка движка по «останови»</li><li>страница задачи и её публикация</li><li>строки <code>ответ:</code>; коммит по ответу о правках без коммита; правка «Постановки» после «да»</li></ul><span class="ref">скилл, шаг 8</span></div><div class="box wait"><h3>Отдаёт пользователю</h3><ul><li>решения с разными последствиями, согласие на очередь шагов</li><li>цель и способ проверки задачи</li><li>миграции, правка compose-файла и настроек Claude Code</li><li>отправка на GitHub, вход в сервис, действия в браузере</li><li>рабочий сервер — ssh только по явному разрешению на этот заход</li><li>переход к другой задаче</li></ul><span class="ref">скилл, шаг 8; протокол § Таск-файлы</span></div></div>
+</section>
+<section id="wait"><h2>Где оркестратор ждёт пользователя</h2><p>Все места, где цикл стоит на человеке.</p>
+<div class="fan"><div class="fan-head">Ход пользователя<span class="ref">скилл</span></div><div class="fan-grid">
+<div class="card"><b>Запуск</b><span>→ <code>/box-orchestrate &lt;задача&gt;</code> в Claude на компьютере в папке проекта</span><span class="ref">скилл, шаг 1</span></div>
+<div class="card"><b>Выбор задачи</b><span>→ окно без имени задачи и после «готово»</span><span class="ref">скилл, шаги 1 и 6</span></div>
+<div class="card"><b>Вопрос блокера</b><span>→ окно с вариантами или свои слова в чате; страница и пуш — перед окном</span><span class="ref">скилл, шаг 4</span></div>
+<div class="card"><b>Шаги руками</b><span>→ по одному: место, вход, команда, что прислать; окно «сделано ли» — после последнего</span><span class="ref">скилл, шаг 4</span></div>
+<div class="card"><b>Сбой движка</b><span>→ правки без коммита — коммит или откат; падение — что делать</span><span class="ref">скилл, шаг 5</span></div>
+<div class="card"><b>Расхождение с задумкой</b><span>→ «да» на готовую правку «Постановки» или свой вариант</span><span class="ref">скилл, шаг 8</span></div>
+<div class="card"><b>Заход на сервер</b><span>→ «да» на вопрос о заходе: сервер, команды, что изменят</span><span class="ref">скилл, шаг 8</span></div>
+<div class="card"><b>Остановка</b><span>→ прямое «останови»</span><span class="ref">скилл, шаг 8</span></div>
+<div class="card"><b>Предел контекста оркестратора</b><span>→ новая сессия оркестратора: <code>/box-orchestrate &lt;задача&gt;</code></span><span class="ref">скилл, шаги 2 и 9</span></div>
+<div class="card"><b>«Готово»</b><span>→ проверка по журналу и предложениям сессий, <code>/box-review</code>, <code>/box-qa</code>, чекбокс в роадмапе</span><span class="ref">скилл, шаг 9; протокол § Статус «готово»</span></div>
+</div></div>
+</section>
+<section id="life"><h2>Вокруг оркестратора</h2><p>Что пользователь запускает сам до и после оркестратора. Без оркестратора: <code>/box-next &lt;задача&gt;</code> — один шаг в сессии, <code>agent-loop.sh &lt;задача&gt;</code> — движок в терминале.</p>
+<ol class="flow">
+<li class="fstep"><span class="n">1</span><div><code>/box-init</code> — в контейнере, первый раз через <code>box-connect</code>: проект в обвязке, <code>claude-box.yml</code><span class="ref">skills/box-init</span></div></li>
+<li class="down" aria-hidden="true"></li>
+<li class="fstep"><span class="n">2</span><div><code>/box-task &lt;описание&gt;</code> или просьба в беседе: таск-файл и строка в роадмапе — после согласия на черновик, слова пользователя отдельно от дописанного сессией<span class="ref">/box-task; протокол § Таск-файлы</span></div></li>
+<li class="down" aria-hidden="true"></li>
+<li class="fstep"><span class="n">3</span><div><code>/box-orchestrate &lt;задача&gt;</code> — цикл до «готово»<span class="ref">скилл</span></div></li>
+<li class="down" aria-hidden="true"></li>
+<li class="fstep"><span class="n">4</span><div>Проверка сделанного: запись журнала о задаче, предложения сессий в итоге<span class="ref">протокол § Статус «готово»</span></div></li>
+<li class="down" aria-hidden="true"></li>
+<li class="fstep"><span class="n">5</span><div><code>/box-review &lt;задача&gt;</code> — этап ревью в конец очереди, статус «в работе»; снова <code>/box-orchestrate &lt;задача&gt;</code><ul class="exits"><li>находки шаг ревью приносит блокером с шагами правок</li></ul><span class="ref">/box-review</span></div></li>
+<li class="down" aria-hidden="true"></li>
+<li class="fstep"><span class="n">6</span><div><code>/box-qa &lt;задача&gt;</code> — сценарии по согласию и этап QA; снова <code>/box-orchestrate &lt;задача&gt; --host</code>: браузер есть только у сессий на компьютере<ul class="exits"><li>провалы шаг QA приносит блокером; кадры прогона — лентой на странице задачи</li></ul><span class="ref">/box-qa</span></div></li>
+<li class="down" aria-hidden="true"></li>
+<li class="fstep"><span class="n">7</span><div>Принято — чекбокс строке задачи в <code>docs/ROADMAP.md</code><span class="ref">протокол § Статус «готово»</span></div></li>
+</ol>
+</section>
+</main>
+<script>
+const b = document.getElementById('theme');
+const names = {'': 'системная', light: 'светлая', dark: 'тёмная'};
+const order = ['', 'light', 'dark'];
+b.addEventListener('click', () => {
+  const cur = document.documentElement.getAttribute('data-theme') || '';
+  const next = order[(order.indexOf(cur) + 1) % 3];
+  if (next) document.documentElement.setAttribute('data-theme', next);
+  else document.documentElement.removeAttribute('data-theme');
+  b.textContent = 'Тема: ' + names[next];
+});
+</script>
+</body>
+</html>
