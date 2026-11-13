@@ -6,3 +6,6 @@ __pycache__
 
 # личные настройки Claude Code на машине: разрешения сессий этого репозитория
 .claude/settings.local.json
+
+# журналы и снимки страниц браузера Playwright из проверок сессий
+.playwright-mcp/
