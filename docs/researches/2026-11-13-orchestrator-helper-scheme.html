@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="ru" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Образец схемы мест · orchestrator-helper</title>
+<style>
+/* токены цвета: светлая и тёмная тема */
+:root {
+  --bg: #f5f6f8;
+  --surface: #ffffff;
+  --fg: #1b1f27;
+  --muted: #586070;
+  --line: #d4d9e1;
+  --done: #1f6e3d;
+  --done-bg: #e0f0e6;
+  --run: #1f50b5;
+  --run-bg: #e2eafa;
+  --wait: #8a5100;
+  --wait-bg: #fcefd5;
+  --fail: #ad2a1f;
+  --fail-bg: #fae3e0;
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #12151a;
+    --surface: #1a1e25;
+    --fg: #e5e8ee;
+    --muted: #9ba3b1;
+    --line: #333a46;
+    --done: #74d39c;
+    --done-bg: #16301f;
+    --run: #93b4ff;
+    --run-bg: #1a2846;
+    --wait: #f0b54a;
+    --wait-bg: #382a10;
+    --fail: #ff8f85;
+    --fail-bg: #3b1b18;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #12151a;
+  --surface: #1a1e25;
+  --fg: #e5e8ee;
+  --muted: #9ba3b1;
+  --line: #333a46;
+  --done: #74d39c;
+  --done-bg: #16301f;
+  --run: #93b4ff;
+  --run-bg: #1a2846;
+  --wait: #f0b54a;
+  --wait-bg: #382a10;
+  --fail: #ff8f85;
+  --fail-bg: #3b1b18;
+  color-scheme: dark;
+}
+html { scroll-behavior: smooth; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 var(--font); }
+/* раскладка: телефон — одна колонка; компьютер — липкое оглавление слева и колонка текста */
+.page { max-width: 46rem; margin-inline: auto; padding: 20px 16px 0; display: grid; gap: 24px; }
+.head, .body { display: grid; gap: 28px; min-width: 0; }
+/* поле под колонкой текста в экран: переход по оглавлению ставит у верха и последний раздел, оглавление остаётся на месте */
+.body { padding-bottom: calc(100vh - 48px); }
+.head { gap: 10px; }
+section { display: grid; gap: 10px; min-width: 0; scroll-margin-top: 16px; }
+@media (min-width: 64rem) {
+  .page { max-width: 64rem; grid-template-columns: 13rem minmax(0, 46rem); grid-template-areas: "toc head" "toc body"; column-gap: 48px; align-items: start; }
+  .head { grid-area: head; }
+  .body { grid-area: body; }
+  .toc { grid-area: toc; position: sticky; top: 20px; }
+}
+h1 { font-size: 1.5rem; line-height: 1.2; margin: 0; text-wrap: balance; }
+h2 { font-size: 1.125rem; line-height: 1.3; margin: 0; }
+h3 { font-size: .9375rem; margin: 6px 0 0; }
+h4 { font-size: .9375rem; margin: 0; }
+p, ul, ol, dl { margin: 0; }
+ul, ol { padding-left: 1.25rem; display: grid; gap: 4px; }
+.goals { gap: 8px; }
+a { color: inherit; text-decoration-thickness: 1px; text-underline-offset: 2px; }
+a:focus-visible, summary:focus-visible, button:focus-visible { outline: 2px solid var(--fg); outline-offset: 3px; border-radius: 4px; }
+.eyebrow { color: var(--muted); font-size: .8125rem; }
+.meta { color: var(--muted); font-size: .875rem; display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; }
+.lead { font-size: 1.0625rem; }
+.note { color: var(--muted); font-size: .875rem; }
+/* метки состояния: цвет — только состояние, слово — всегда; заливка — только у того, что требует внимания сейчас */
+.st { display: inline-block; padding: 1px 10px; border: 1px solid; border-radius: 999px; font-size: .8125rem; font-weight: 600; white-space: nowrap; }
+.st-wait { color: var(--wait); background: var(--wait-bg); border-color: var(--wait); }
+.st-run { color: var(--run); background: var(--run-bg); border-color: var(--run); }
+.st-fail { color: var(--fail); background: var(--fail-bg); border-color: var(--fail); }
+.st-failed { color: var(--fail); background: var(--surface); border-color: var(--fail); }
+.st-done { color: var(--done); background: var(--surface); border-color: var(--done); }
+.st-part { color: var(--fg); background: var(--surface); border-color: var(--fg); font-weight: 500; }
+.st-past { color: var(--muted); background: var(--surface); border-color: var(--line); font-weight: 500; }
+.st-todo { color: var(--muted); background: var(--surface); border-color: var(--muted); border-style: dashed; font-weight: 500; }
+/* подпись вида основания и части варианта: мелкие серые прописные */
+.kind { color: var(--muted); font-size: .75rem; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+/* оглавление: на телефоне — плитки в две колонки под шапкой, на компьютере — столбик с отметкой текущего раздела */
+.toc { display: grid; gap: 8px; }
+.toc-h { color: var(--muted); font-size: .75rem; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+.toc ul { list-style: none; padding: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.toc a { display: flex; align-items: center; min-height: 40px; padding: 0 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); text-decoration: none; font-size: .875rem; }
+.toc .sep { display: none; }
+@media (min-width: 64rem) {
+  .toc ul { grid-template-columns: 1fr; gap: 0; }
+  .toc a { min-height: 34px; border: 0; border-left: 3px solid var(--line); border-radius: 0; background: none; }
+  .toc a[aria-current] { border-left-color: var(--fg); font-weight: 600; }
+  .toc .sep { display: block; margin-top: 12px; padding: 0 0 4px 13px; color: var(--muted); font-size: .75rem; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+}
+/* блок вопроса: янтарная полоса с вопросом — единственная крупная цветная площадь; тело — нейтральная поверхность */
+.ask { padding: 0; gap: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
+.ask-top { display: grid; gap: 8px; padding: 14px 16px; background: var(--wait-bg); border-bottom: 1px solid var(--wait); border-radius: 10px 10px 0 0; }
+.ask-top h2 { color: var(--wait); font-size: .8125rem; text-transform: uppercase; letter-spacing: .05em; }
+.ask-top .q { font-size: 1.125rem; font-weight: 600; line-height: 1.35; }
+.ask-body { display: grid; gap: 10px; padding: 16px; min-width: 0; }
+.opts { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr)); scroll-margin-top: 16px; }
+.opt { display: grid; gap: 6px; align-content: start; padding: 12px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; min-width: 0; scroll-margin-top: 16px; }
+/* то, из чего выбирают: картинки с подписями и текст на проверку так, как его увидит читатель */
+.look { display: grid; gap: 12px; }
+.look figure { margin: 0; display: grid; gap: 4px; }
+.look img { display: block; border: 1px solid var(--line); border-radius: 8px; }
+.look blockquote { margin: 0; padding: 10px 12px; display: grid; gap: 8px; background: var(--bg); border-left: 3px solid var(--line); }
+/* проверка в браузере: сценарий — обложка кадров слева, текст справа */
+.sc { display: grid; grid-template-columns: 8rem minmax(0, 1fr); gap: 12px; align-items: start; padding-top: 10px; border-top: 1px solid var(--line); }
+.sc > div { display: grid; gap: 4px; min-width: 0; }
+.sc h3 { margin: 0; }
+.sc h3 .st { margin-left: 4px; vertical-align: 1px; }
+.shot { margin: 0; display: grid; gap: 4px; }
+.shot img { display: block; width: 100%; height: auto; border: 1px solid var(--line); border-radius: 6px; }
+@media (min-width: 40rem) { .sc { grid-template-columns: 12rem minmax(0, 1fr); } }
+/* история: черта и заголовок крупнее разделов — граница главного */
+.hist { display: grid; gap: 28px; padding-top: 14px; border-top: 2px solid var(--fg); scroll-margin-top: 16px; }
+.hist > header { display: grid; gap: 4px; }
+.hist > header h2 { font-size: 1.375rem; }
+.scroll { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: .875rem; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; vertical-align: top; padding: 7px 12px 7px 0; border-bottom: 1px solid var(--line); }
+th { color: var(--muted); font-weight: 600; white-space: nowrap; }
+tr.day td { padding-top: 14px; font-weight: 600; }
+tr.it td { border-bottom: 0; padding-bottom: 2px; }
+tr.cm td { padding-top: 0; color: var(--muted); }
+td.nw { white-space: nowrap; }
+td.n { white-space: nowrap; color: var(--muted); }
+/* этап очереди шагов: строка во всю ширину и бледное пояснение под ней */
+tr.stage td { padding-top: 18px; border-bottom: 0; padding-bottom: 2px; font-weight: 600; }
+tr.stage-note td { padding-top: 0; color: var(--muted); }
+.hash { font-family: var(--mono); font-size: .8125rem; }
+details { border-top: 1px solid var(--line); padding-top: 10px; display: grid; gap: 8px; scroll-margin-top: 16px; }
+summary { cursor: pointer; font-weight: 600; }
+details[open] > summary { margin-bottom: 4px; }
+.qa summary { font-weight: 400; }
+.qa summary .meta { display: inline-flex; margin-right: 6px; }
+/* кнопка «Наверх»: одна на страницу, внизу справа, появляется после двух экранов прокрутки */
+.top { position: fixed; right: 16px; bottom: 16px; padding: 10px 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 999px; font-size: .875rem; font-weight: 600; text-decoration: none; box-shadow: 0 2px 8px rgb(0 0 0 / .15); opacity: 0; pointer-events: none; transition: opacity .2s; }
+.top.on { opacity: 1; pointer-events: auto; }
+/* просмотр картинки: нажатие на картинку открывает её поверх страницы целиком в экране; у обложки сценария — ленту его кадров:
+   куски вплотную друг под другом, ширина — доля ширины окна --z, лента шире окна прокручивается вбок */
+.page img { cursor: zoom-in; }
+/* страница под открытым окном стоит: у ленты одна полоса прокрутки, место на странице после закрытия прежнее */
+html:has(.view[open]) { overflow: hidden; }
+.view { width: 100%; height: 100%; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; background: rgb(0 0 0 / .95); }
+.view[open] { display: flex; }
+.tape { flex: 1; min-width: 0; overflow: auto; overscroll-behavior: contain; outline: 0; cursor: grab; }
+.tape img { display: block; width: calc(var(--z, 1) * 100%); max-width: none; height: auto; margin-inline: auto; }
+.view.one .tape { display: flex; align-items: center; justify-content: center; padding: 16px; box-sizing: border-box; cursor: zoom-out; }
+.view.one .tape img { width: auto; max-width: 100%; max-height: 100%; min-height: 0; object-fit: contain; }
+.view.one .zoom { display: none; }
+.view .bar { position: fixed; top: 12px; right: 12px; display: flex; gap: 8px; }
+.view button { min-width: 40px; padding: 8px 14px; background: var(--surface); color: var(--fg); border: 1px solid var(--line); border-radius: 999px; font: inherit; font-size: .875rem; font-weight: 600; cursor: pointer; }
+.view button:disabled { opacity: .4; cursor: default; }
+/* схема мест просьбы сделать руками: место — столбец-рамка во всю высоту схемы с номерами своих шагов, переход — строка
+   со стрелкой от середины столбца к середине столбца и входом над ней; столбцов больше, чем влезает, — прокрутка вбок */
+.map { display: grid; grid-template-columns: repeat(var(--lanes), minmax(5rem, 1fr)); grid-template-rows: repeat(var(--rows), auto) 6px; min-width: calc(var(--lanes) * 5rem); }
+.lane { grid-row: 1 / -1; margin-inline: 3px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; }
+.lane-h { grid-row: 1; padding: 8px 8px 2px; text-align: center; font-size: .8125rem; font-weight: 600; }
+.stp { margin: 4px 5px; padding: 5px 6px; overflow-wrap: anywhere; background: var(--surface); border: 1px solid var(--fg); border-radius: 6px; font-size: .8125rem; line-height: 1.35; }
+.stp b { display: inline-block; min-width: 1.5em; margin-right: 4px; border-radius: 999px; background: var(--fg); color: var(--surface); font-size: .75rem; text-align: center; }
+.go { position: relative; padding: 6px 6px 16px; text-align: center; font-size: .8125rem; color: var(--muted); overflow-wrap: anywhere; --edge: calc(100% / (2 * var(--span))); }
+.go span { position: relative; padding: 0 4px; background: var(--surface); border-radius: 4px; }
+.go code { font: .8125rem var(--mono); color: var(--fg); }
+.go::before, .go::after { content: ""; position: absolute; }
+.go::before { left: var(--edge); right: var(--edge); bottom: 7px; border-top: 2px solid var(--fg); }
+.go.right::after { right: calc(var(--edge) - 2px); bottom: 3px; border-left: 9px solid var(--fg); border-block: 5px solid transparent; }
+.go.left::after { left: calc(var(--edge) - 2px); bottom: 3px; border-right: 9px solid var(--fg); border-block: 5px solid transparent; }
+.go.down { padding-bottom: 18px; }
+.go.down::before { left: 50%; right: auto; bottom: 6px; height: 10px; border-top: 0; border-left: 2px solid var(--fg); }
+.go.down::after { left: calc(50% - 4px); bottom: 0; border-top: 8px solid var(--fg); border-inline: 5px solid transparent; }
+.dark {
+  --bg: #12151a; --surface: #1a1e25; --fg: #e5e8ee; --muted: #9ba3b1; --line: #333a46;
+  --done: #74d39c; --done-bg: #16301f; --run: #93b4ff; --run-bg: #1a2846; --wait: #f0b54a; --wait-bg: #382a10;
+  --fail: #ff8f85; --fail-bg: #3b1b18;
+  color-scheme: dark;
+}
+/* стенд образца: светлая и тёмная тема рядом, на узком экране — друг под другом */
+.stand { display: grid; gap: 24px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr)); max-width: 96rem; margin-inline: auto; padding: 20px 0 40px; }
+.theme { display: grid; gap: 10px; align-content: start; padding: 16px; background: var(--bg); color: var(--fg); border-radius: 12px; }
+.intro { max-width: 46rem; margin-inline: auto; padding: 20px 16px 0; display: grid; gap: 8px; }
+</style>
+
+</head>
+<body>
+<!-- образец схемы мест задачи orchestrator-helper, шаг «Доработка ресерча — схема»: блок «Ждёт решения» страницы задачи с просьбой сделать руками в светлой и тёмной теме; данные схемы — макет 2026-11-13-orchestrator-helper-maket.md -->
+<div class="intro">
+  <h1>Образец схемы мест</h1>
+  <p class="note">Блок «Ждёт решения» страницы задачи с просьбой сделать руками: слева светлая тема, справа тёмная. Сузь окно до ширины телефона — столбцы мест сожмутся, страница вбок не поедет. Данные схемы — в макете <code>2026-11-13-orchestrator-helper-maket.md</code>, задача вымышленная.</p>
+</div>
+<div class="stand">
+  <div class="theme">
+    <section class="ask" id="ask">
+      <div class="ask-top">
+        <h2>Ждёт решения</h2>
+        <p class="q">Сделано ли то, что сессия просит руками: новая версия на рабочем сервере и выгрузка за год?</p>
+        <p>Ответ — один из <a href="#opts-1">двух вариантов ниже</a> в окне вопроса в чате оркестратора — Claude, который ведёт задачу. Свой вариант окно примет текстом.</p>
+      </div>
+      <div class="ask-body">
+        <p class="kind">Что происходит</p>
+        <p>Выгрузка за год теперь собирается в фоне, и ссылка на файл приходит письмом. На тестовой копии это работает, по трём пробам сессии. Сессия не дотягивается до рабочего сервера и почты клиента, поэтому проверка — твоими руками. Шаги по одному приходят в чат оркестратора, здесь — где какой шаг делается.</p>
+        <p class="kind">Где что делать</p>
+        <div class="scroll">
+          <div class="map" style="--lanes: 3; --rows: 15">
+            <div class="lane" style="grid-column: 1"></div>
+            <div class="lane" style="grid-column: 2"></div>
+            <div class="lane" style="grid-column: 3"></div>
+            <p class="lane-h" style="grid-column: 1">Компьютер</p>
+            <p class="lane-h" style="grid-column: 2">Сервер</p>
+            <p class="lane-h" style="grid-column: 3">Браузер</p>
+            <p class="go down" style="grid-column: 1 / 2; grid-row: 2; --span: 1"><span>терминал в папке проекта</span></p>
+            <p class="stp" style="grid-column: 1; grid-row: 3"><b>1</b> отправить новую версию на сервер</p>
+            <p class="go right" style="grid-column: 1 / 3; grid-row: 4; --span: 2"><span><code>ssh &lt;сервер&gt;</code>, затем <code>cd &lt;папка проекта&gt;</code></span></p>
+            <p class="stp" style="grid-column: 2; grid-row: 5"><b>2</b> пересобрать приложение</p>
+            <p class="go right" style="grid-column: 2 / 4; grid-row: 6; --span: 2"><span><code>https://&lt;адрес&gt;/expenses</code></span></p>
+            <p class="stp" style="grid-column: 3; grid-row: 7"><b>3</b> выгрузить расходы за год</p>
+            <p class="go left" style="grid-column: 2 / 4; grid-row: 8; --span: 2"><span>окно терминала с ssh</span></p>
+            <p class="stp" style="grid-column: 2; grid-row: 9"><b>4</b> найти выгрузку в журнале</p>
+            <p class="go right" style="grid-column: 2 / 4; grid-row: 10; --span: 2"><span>почта тестового клиента</span></p>
+            <p class="stp" style="grid-column: 3; grid-row: 11"><b>5</b> скачать файл из письма</p>
+            <p class="go left" style="grid-column: 1 / 4; grid-row: 12; --span: 3"><span>папка «Загрузки»</span></p>
+            <p class="stp" style="grid-column: 1; grid-row: 13"><b>6</b> открыть файл в таблице</p>
+            <p class="go right" style="grid-column: 1 / 3; grid-row: 14; --span: 2"><span>окно терминала с ssh</span></p>
+            <p class="stp" style="grid-column: 2; grid-row: 15"><b>7</b> убрать старый образ</p>
+          </div>
+        </div>
+        <p class="note">Как читать: столбец — место, номер — шаг в чате оркестратора по порядку, стрелка — переход в другое место, над ней — как туда попасть.</p>
+        <p class="kind">Варианты</p>
+        <div class="opts" id="opts-1">
+          <div class="opt" id="opt-1-a">
+            <h4>А — Сделано, вывод прислан</h4>
+            <p>Оркестратор проверит присланное и запустит следующий шаг задачи.</p>
+          </div>
+          <div class="opt" id="opt-1-b">
+            <h4>Б — Не вышло</h4>
+            <p>Оркестратор разберёт присланное и даст шаг починки.</p>
+          </div>
+        </div>
+        <p><b>Рекомендация</b> — вариант по итогу последнего шага.</p>
+      </div>
+    </section>
+  </div>
+  <div class="theme dark">
+    <section class="ask" id="dark-ask">
+      <div class="ask-top">
+        <h2>Ждёт решения</h2>
+        <p class="q">Сделано ли то, что сессия просит руками: новая версия на рабочем сервере и выгрузка за год?</p>
+        <p>Ответ — один из <a href="#dark-opts-1">двух вариантов ниже</a> в окне вопроса в чате оркестратора — Claude, который ведёт задачу. Свой вариант окно примет текстом.</p>
+      </div>
+      <div class="ask-body">
+        <p class="kind">Что происходит</p>
+        <p>Выгрузка за год теперь собирается в фоне, и ссылка на файл приходит письмом. На тестовой копии это работает, по трём пробам сессии. Сессия не дотягивается до рабочего сервера и почты клиента, поэтому проверка — твоими руками. Шаги по одному приходят в чат оркестратора, здесь — где какой шаг делается.</p>
+        <p class="kind">Где что делать</p>
+        <div class="scroll">
+          <div class="map" style="--lanes: 3; --rows: 15">
+            <div class="lane" style="grid-column: 1"></div>
+            <div class="lane" style="grid-column: 2"></div>
+            <div class="lane" style="grid-column: 3"></div>
+            <p class="lane-h" style="grid-column: 1">Компьютер</p>
+            <p class="lane-h" style="grid-column: 2">Сервер</p>
+            <p class="lane-h" style="grid-column: 3">Браузер</p>
+            <p class="go down" style="grid-column: 1 / 2; grid-row: 2; --span: 1"><span>терминал в папке проекта</span></p>
+            <p class="stp" style="grid-column: 1; grid-row: 3"><b>1</b> отправить новую версию на сервер</p>
+            <p class="go right" style="grid-column: 1 / 3; grid-row: 4; --span: 2"><span><code>ssh &lt;сервер&gt;</code>, затем <code>cd &lt;папка проекта&gt;</code></span></p>
+            <p class="stp" style="grid-column: 2; grid-row: 5"><b>2</b> пересобрать приложение</p>
+            <p class="go right" style="grid-column: 2 / 4; grid-row: 6; --span: 2"><span><code>https://&lt;адрес&gt;/expenses</code></span></p>
+            <p class="stp" style="grid-column: 3; grid-row: 7"><b>3</b> выгрузить расходы за год</p>
+            <p class="go left" style="grid-column: 2 / 4; grid-row: 8; --span: 2"><span>окно терминала с ssh</span></p>
+            <p class="stp" style="grid-column: 2; grid-row: 9"><b>4</b> найти выгрузку в журнале</p>
+            <p class="go right" style="grid-column: 2 / 4; grid-row: 10; --span: 2"><span>почта тестового клиента</span></p>
+            <p class="stp" style="grid-column: 3; grid-row: 11"><b>5</b> скачать файл из письма</p>
+            <p class="go left" style="grid-column: 1 / 4; grid-row: 12; --span: 3"><span>папка «Загрузки»</span></p>
+            <p class="stp" style="grid-column: 1; grid-row: 13"><b>6</b> открыть файл в таблице</p>
+            <p class="go right" style="grid-column: 1 / 3; grid-row: 14; --span: 2"><span>окно терминала с ssh</span></p>
+            <p class="stp" style="grid-column: 2; grid-row: 15"><b>7</b> убрать старый образ</p>
+          </div>
+        </div>
+        <p class="note">Как читать: столбец — место, номер — шаг в чате оркестратора по порядку, стрелка — переход в другое место, над ней — как туда попасть.</p>
+        <p class="kind">Варианты</p>
+        <div class="opts" id="dark-opts-1">
+          <div class="opt" id="dark-opt-1-a">
+            <h4>А — Сделано, вывод прислан</h4>
+            <p>Оркестратор проверит присланное и запустит следующий шаг задачи.</p>
+          </div>
+          <div class="opt" id="dark-opt-1-b">
+            <h4>Б — Не вышло</h4>
+            <p>Оркестратор разберёт присланное и даст шаг починки.</p>
+          </div>
+        </div>
+        <p><b>Рекомендация</b> — вариант по итогу последнего шага.</p>
+      </div>
+    </section>
+  </div>
+</div>
+</body>
+</html>
