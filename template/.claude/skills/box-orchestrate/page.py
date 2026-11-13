@@ -496,6 +496,43 @@ def look(q, root, store, copies, lost):
     return ['<p class="kind">Как это выглядит</p>', '<div class="look">', *out, '</div>'] if out else []
 
 
+# признак стилей схемы мест в каркасе: страница, заведённая до них, получает их командой new
+MAP_STYLE = '.map {'
+
+
+def enter(s):
+    # вход — текст со вставками команд в обратных кавычках, как в строке «Вход:» блокера
+    return re.sub(r'`([^`]+)`', r'<code>\1</code>', esc(s))
+
+
+def places(hands):
+    # схема мест просьбы сделать руками: место — столбец в порядке первого шага места, шаг — плашка в строке сетки,
+    # переход — строка перед шагом, сменившим место, со стрелкой между серединами столбцов и входом над ней;
+    # над первым шагом — стрелка вниз со входом
+    lanes = list(dict.fromkeys(h['where'] for h in hands))
+    rows, prev, items = 1, None, []
+    for n, h in enumerate(hands, 1):
+        col = lanes.index(h['where']) + 1
+        if col != prev:
+            if not h.get('enter', '').strip():
+                fail(2, f'текст команды question: у шага {n} просьбы сделать руками нет enter — '
+                        f'{"первый шаг" if prev is None else "шаг сменил место"}, нужен вход в «{h["where"]}»; страница не обновлена')
+            rows += 1
+            lo, hi = min(prev or col, col), max(prev or col, col)
+            way = 'down' if prev is None else ('right' if col > prev else 'left')
+            items.append(f'<p class="go {way}" style="grid-column: {lo} / {hi + 1}; grid-row: {rows}; --span: {hi - lo + 1}">'
+                         f'<span>{enter(h["enter"])}</span></p>')
+        rows += 1
+        items.append(f'<p class="stp" style="grid-column: {col}; grid-row: {rows}"><b>{n}</b> {esc(h["what"])}</p>')
+        prev = col
+    out = ['<p class="kind">Где что делать</p>', '<div class="scroll">', f'  <div class="map" style="--lanes: {len(lanes)}; --rows: {rows}">']
+    out += [f'    <div class="lane" style="grid-column: {i}"></div>' for i in range(1, len(lanes) + 1)]
+    out += [f'    <p class="lane-h" style="grid-column: {i}">{esc(w)}</p>' for i, w in enumerate(lanes, 1)]
+    return out + ['    ' + s for s in items] + ['  </div>', '</div>',
+                                                 '<p class="note">Как читать: столбец — место, номер — шаг в чате оркестратора по порядку, '
+                                                 'стрелка — переход в другое место, над ней — как туда попасть.</p>']
+
+
 def render_ask(data, root, store, copies, lost):
     qs = data['questions']
     many = len(qs) > 1
@@ -510,6 +547,7 @@ def render_ask(data, root, store, copies, lost):
         if many:
             body.append(f'  <h3>Вопрос {q.get("n", i)}</h3>')
         body += ['  <p class="kind">Что происходит</p>', *('  ' + p for p in paras(q['about'])),
+                 *('  ' + s for s in (places(q['hands']) if q.get('hands') else [])),
                  *('  ' + s for s in look(q, root, store, copies, lost)), '  <p class="kind">Варианты</p>', f'  <div class="opts" id="opts-{i}">']
         for letter, o in zip(LETTERS, q['options']):
             body += [f'    <div class="opt" id="opt-{i}-{letter}">', f'      <h4>{esc(o["title"])}</h4>',
@@ -594,6 +632,8 @@ def main():
         fresh = [str(n) for v in read_task(task_file)[2].values() for n, _ in v if n not in shown]
         if fresh:
             fail(3, f'{rel}: на странице нет этапа таск-файла {", ".join(fresh)} — сначала команда new, затем эта команда снова')
+        if cmd == 'question' and any(q.get('hands') for q in data['questions']) and MAP_STYLE not in page:
+            fail(3, f'{rel}: в каркасе страницы нет стилей схемы мест — сначала команда new, затем эта команда снова')
         before = page
         state = STATE[cmd]
         extra = paras(text) if cmd in ('stop', 'done') else []

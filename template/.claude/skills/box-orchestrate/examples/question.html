@@ -121,6 +121,23 @@ a:focus-visible, summary:focus-visible, button:focus-visible { outline: 2px soli
 .look figure { margin: 0; display: grid; gap: 4px; }
 .look img { display: block; border: 1px solid var(--line); border-radius: 8px; }
 .look blockquote { margin: 0; padding: 10px 12px; display: grid; gap: 8px; background: var(--bg); border-left: 3px solid var(--line); }
+/* схема мест просьбы сделать руками: место — столбец-рамка во всю высоту схемы с номерами своих шагов, переход — строка
+   со стрелкой от середины столбца к середине столбца и входом над ней; столбцов больше, чем влезает, — прокрутка вбок */
+.map { display: grid; grid-template-columns: repeat(var(--lanes), minmax(5rem, 1fr)); grid-template-rows: repeat(var(--rows), auto) 6px; min-width: calc(var(--lanes) * 5rem); }
+.lane { grid-row: 1 / -1; margin-inline: 3px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; }
+.lane-h { grid-row: 1; padding: 8px 8px 2px; text-align: center; font-size: .8125rem; font-weight: 600; }
+.stp { margin: 4px 5px; padding: 5px 6px; overflow-wrap: anywhere; background: var(--surface); border: 1px solid var(--fg); border-radius: 6px; font-size: .8125rem; line-height: 1.35; }
+.stp b { display: inline-block; min-width: 1.5em; margin-right: 4px; border-radius: 999px; background: var(--fg); color: var(--surface); font-size: .75rem; text-align: center; }
+.go { position: relative; padding: 6px 6px 16px; text-align: center; font-size: .8125rem; color: var(--muted); overflow-wrap: anywhere; --edge: calc(100% / (2 * var(--span))); }
+.go span { position: relative; padding: 0 4px; background: var(--surface); border-radius: 4px; }
+.go code { font: .8125rem var(--mono); color: var(--fg); }
+.go::before, .go::after { content: ""; position: absolute; }
+.go::before { left: var(--edge); right: var(--edge); bottom: 7px; border-top: 2px solid var(--fg); }
+.go.right::after { right: calc(var(--edge) - 2px); bottom: 3px; border-left: 9px solid var(--fg); border-block: 5px solid transparent; }
+.go.left::after { left: calc(var(--edge) - 2px); bottom: 3px; border-right: 9px solid var(--fg); border-block: 5px solid transparent; }
+.go.down { padding-bottom: 18px; }
+.go.down::before { left: 50%; right: auto; bottom: 6px; height: 10px; border-top: 0; border-left: 2px solid var(--fg); }
+.go.down::after { left: calc(50% - 4px); bottom: 0; border-top: 8px solid var(--fg); border-inline: 5px solid transparent; }
 /* проверка в браузере: сценарий — обложка кадров слева, текст справа */
 .sc { display: grid; grid-template-columns: 8rem minmax(0, 1fr); gap: 12px; align-items: start; padding-top: 10px; border-top: 1px solid var(--line); }
 .sc > div { display: grid; gap: 4px; min-width: 0; }
