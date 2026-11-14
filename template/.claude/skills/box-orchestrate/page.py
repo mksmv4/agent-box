@@ -441,7 +441,6 @@ def render_common(page, state, task_file, log, task, now, extra, root, store, fr
     cur = next((name for done, name in steps if not done), '')
     on = {'идёт': RUN, 'ждёт решения': WAIT, 'стоит': STAND}.get(state, TODO)
     meta = ['<p class="meta">', f'  {label(READY if state == "готово" else on)}',
-            f'  <span>шаг {min(closed + 1, total)} из {total}</span>',
             f'  <span>{len(its)} {plural(len(its), "итерация", "итерации", "итераций")}</span>']
     if its:
         meta.append(f'  <span>в работе с {its[0]["at"]}</span>')
