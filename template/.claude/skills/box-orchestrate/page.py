@@ -4,7 +4,7 @@
 # в браузере — там же лентами с подписями сессии QA под кадрами и обложками WebP. Данные — таск-файл, журнал цикла, сценарии QA
 # с их снимками экрана и подписями и текст оркестратора со stdin. Склейка кадров — библиотекой Pillow: она нужна, когда у задачи
 # есть снимки прогона; подписи — шрифтом DejaVu Sans.
-# Вызов из корня проекта: python3 .claude/skills/box-orchestrate/page.py <задача> <команда> [адрес] <<'EOF' … EOF
+# Вызов из корня проекта: python3 .claude/skills/box-orchestrate/page.py <задача> <команда> <<'EOF' … EOF
 # Команды и форма текста — SKILL.md рядом, шаг «Страница задачи», текст question — questions.md; устройство страницы и метки — pages.md.
 import functools
 import hashlib
@@ -39,8 +39,6 @@ ENGINE = 'движок — скрипт, который запускает Claud
 ORCH = 'оркестратор — Claude, который ведёт задачу, —'
 # кусок ленты кадров — до 16 000 пикселей в высоту: WebP держит до 16 383
 STRIP, QUALITY = 16000, 80
-# записей в files одного ответа — до 255, остаток уходит со следующим событием
-FILES = 255
 PILLOW = ('нет библиотеки Pillow для склейки кадров прогона — установка: sudo apt install python3-pil, '
           'вне Debian и Ubuntu — python3 -m pip install Pillow; страница не обновлена')
 # подпись под кадром ленты: шрифт с кириллицей — Pillow ищет файл в папках шрифтов системы; полоса — тёмная, текст — белый:
@@ -325,8 +323,8 @@ def band(text, w):
 
 def stamp(part):
     # ключ файла — имена, размеры и время правки снимков, из которых он собран, и подписи кадров: новый или переснятый кадр
-    # и новая подпись — новое имя, и публикация несёт новый файл, а прежний убирает уборка; у кадров без подписей ключ
-    # тот же, что у лент до подписей, и такие ленты остаются прежними файлами
+    # и новая подпись — новое имя файла; у кадров без подписей ключ тот же, что у лент до подписей, и такие ленты
+    # остаются прежними файлами
     return hashlib.sha1(''.join(f'{s.name} {s.stat().st_size} {s.stat().st_mtime_ns}{f" {t}" if t else ""}\n'
                                 for s, _, t, _ in part).encode()).hexdigest()[:10]
 
@@ -354,7 +352,7 @@ def build(copy, part):
     tmp.replace(copy)
 
 
-def ribbon(store, rnd, n, shots, frames):
+def ribbon(store, rnd, n, shots):
     # кадры сценария по порядку с подписями — куски ленты до STRIP пикселей в высоту и обложка — последний кадр без подписи;
     # кадр — (снимок, размер в ленте, подпись, высота с полосой подписи), кадр с полосой выше STRIP уменьшается под STRIP;
     # файлы собираются один раз — по ключу в имени
@@ -377,11 +375,10 @@ def ribbon(store, rnd, n, shots, frames):
     for copy, part in [*out, (cover, last)]:
         if not copy.exists():
             build(copy, part)
-        frames.add(copy)
     return cover, [copy for copy, _ in out]
 
 
-def render_browser(root, task, stages, store, frames):
+def render_browser(root, task, stages, store):
     # «Проверка в браузере»: сценарии QA с итогом и кадрами последнего захода; файла сценариев нет — раздела нет
     scen = root / 'docs' / 'qa' / f'{task}.md'
     if not scen.exists():
@@ -404,7 +401,7 @@ def render_browser(root, task, stages, store, frames):
         mine = [shot for _, shot in sorted(shots.get(n, []))]
         # обложка — последний кадр сценария; куски ленты — в data-show через пробел, нажатие на обложку открывает их лентой
         if mine:
-            face, strips = ribbon(store, rounds[-1], n, mine, frames)
+            face, strips = ribbon(store, rounds[-1], n, mine)
             src = [html.escape(f'{store.name}/{c.name}') for c in strips]
             k = len(mine)
             cover = (f'<figure class="shot"><img src="{html.escape(f"{store.name}/{face.name}")}" data-show="{" ".join(src)}" '
@@ -431,7 +428,7 @@ def render_browser(root, task, stages, store, frames):
             ['<section id="browser">', '  <h2>Проверка в браузере</h2>', *('  ' + s for s in head), *items, '</section>'])
 
 
-def render_common(page, state, task_file, log, task, now, extra, root, store, frames, notes=None):
+def render_common(page, state, task_file, log, task, now, extra, root, store, notes=None):
     status, steps, stages = read_task(task_file)
     if notes is None:
         notes = read_stages(page)[1]
@@ -462,7 +459,7 @@ def render_common(page, state, task_file, log, task, now, extra, root, store, fr
     page = put(page, 'steps', wrap(['№', 'Шаг', 'Состояние'], rows))
     page = put(page, 'now', render_now(state, its, last, extra))
     page = put(page, 'its', render_its(its, state, closed, now))
-    toc, browser = render_browser(root, task, stages, store, frames)
+    toc, browser = render_browser(root, task, stages, store)
     page = put(page, 'toc-browser', toc)
     page = put(page, 'browser', browser)
     if state != 'ждёт решения':
@@ -477,14 +474,14 @@ def look(q, root, store, copies, lost):
     if q.get('quote'):
         out += ['  <blockquote>', *('    ' + p for p in paras(q['quote'])), '  </blockquote>']
     for im in q.get('images', []):
-        # файл картинки — только внутри папки проекта: путь называет блокер, а страница уходит на claude.ai;
-        # картинка без файла в папке проекта пропускается — вопрос уходит на страницу без неё, путь называет ответ скрипта
+        # файл картинки — только внутри папки проекта: путь называет блокер;
+        # картинка без файла в папке проекта пропускается — вопрос встаёт на страницу без неё, путь называет ответ скрипта
         path = (root / im['path']).resolve()
         kind = mimetypes.guess_type(path.name)[0]
         if not path.is_relative_to(root.resolve()) or not path.is_file() or not (kind or '').startswith('image/'):
             lost.append(im['path'])
             continue
-        # копия — с именем по содержимому: та же картинка — тот же файл, новая — новый адрес
+        # копия — с именем по содержимому: та же картинка — тот же файл, новая — новый файл
         body = path.read_bytes()
         copy = store / (hashlib.sha1(body).hexdigest()[:12] + path.suffix.lower())
         copies[copy] = body
@@ -497,6 +494,8 @@ def look(q, root, store, copies, lost):
 
 # признак стилей схемы мест в каркасе: страница, заведённая до них, получает их командой new
 MAP_STYLE = '.map {'
+# признак самообновления в каркасе: страница, заведённая до него, получает его командой new на первом же событии
+RELOAD = 'location.reload()'
 
 
 def enter(s):
@@ -556,45 +555,18 @@ def render_ask(data, root, store, copies, lost):
 
 
 def main():
-    if len(sys.argv) < 3 or sys.argv[2] not in [*STATE, 'new', 'link', 'sent']:
-        fail(2, 'вызов: page.py <задача> new|iteration|question|answer|stop|done|link [адрес]|sent, текст — со stdin')
+    if len(sys.argv) < 3 or sys.argv[2] not in [*STATE, 'new']:
+        fail(2, 'вызов: page.py <задача> new|iteration|question|answer|stop|done, текст — со stdin')
     task, cmd = sys.argv[1], sys.argv[2]
     root = Path(git('rev-parse', '--show-toplevel'))
     log = Path(git('rev-parse', '--absolute-git-dir')) / 'agent-loop.log'
     task_file = root / 'docs' / 'tasks' / f'{task}.md'
     pages = root / 'my_local' / 'pages'
-    file, links = pages / f'{task}.html', pages / 'links.md'
+    file = pages / f'{task}.html'
     rel = file.relative_to(root)
     if not task_file.exists():
         fail(2, f'нет таск-файла {task_file.relative_to(root)}')
     pages.mkdir(parents=True, exist_ok=True)
-    known = links.read_text().splitlines() if links.exists() else []
-    mine = f'- {task} — '
-    url = next((s[len(mine):] for s in known if s.startswith(mine)), None)
-    # файлы кадров прогона, которые уже дошли до страницы, и кадры последнего ответа скрипта — новые и убранные (null):
-    # отметки по ним правит команда sent после удачной публикации
-    ledger, sending = pages / task / 'sent.txt', pages / task / 'sending.json'
-    sent = set(ledger.read_text().split()) if ledger.exists() else set()
-
-    if cmd == 'link':
-        if len(sys.argv) < 4:
-            fail(2, 'вызов: page.py <задача> link <адрес>')
-        links.write_text('\n'.join([s for s in known if not s.startswith(mine)] + [mine + sys.argv[3]]) + '\n')
-        # новый адрес — новая страница без файлов прежней: отметки кадров снимаются, их несёт следующая публикация
-        reset = bool(url and url != sys.argv[3] and sent)
-        if reset:
-            ledger.write_text('')
-        print(f'{links.relative_to(root)}: адрес задачи {task} — {sys.argv[3]}' + ('; кадры прогона — со следующей публикацией' if reset else ''))
-        return
-
-    if cmd == 'sent':
-        out = json.loads(sending.read_text()) if sending.exists() else {}
-        added, gone = {k for k, v in out.items() if v}, {k for k, v in out.items() if v is None}
-        if out:
-            ledger.write_text(''.join(f'{s}\n' for s in sorted(sent - gone | added)))
-            sending.write_text('{}')
-        print(f'{ledger.relative_to(root)}: кадры прогона отмечены отправленными — {len(added)}, сняты с отметок — {len(gone)}')
-        return
 
     text = sys.stdin.read() if not sys.stdin.isatty() else ''
     try:
@@ -602,7 +574,7 @@ def main():
     except json.JSONDecodeError as e:
         fail(2, f'текст команды {cmd} — не JSON: {e}')
     now = datetime.now()
-    copies, uploads, lost, frames = {}, {}, [], set()
+    copies, lost = {}, []
 
     if cmd == 'new':
         page = SKELETON.read_text()
@@ -619,13 +591,15 @@ def main():
         old = file.read_text() if file.exists() else ''
         page = put(page, 'qa', get(old, 'qa') if span(old, 'qa') else [NO_QA])
         page, _, _ = render_common(page, 'готово' if status == 'готово' else 'стоит', task_file, log, task, now, [],
-                                   root, pages / task, frames, notes)
+                                   root, pages / task, notes)
         file.write_text(page)
         what = 'страница заведена'
     else:
         page = file.read_text() if file.exists() else ''
         if any(span(page, m) is None for m in MARKS):
             fail(3, f'{rel}: страницы нет или в ней нет меток — сначала команда new, затем эта команда снова')
+        if RELOAD not in page:
+            fail(3, f'{rel}: в каркасе страницы нет самообновления — сначала команда new, затем эта команда снова')
         # этап, появившийся в таск-файле после new, — пояснение к нему пишет оркестратор командой new
         shown = read_stages(page)[0]
         fresh = [str(n) for v in read_task(task_file)[2].values() for n, _ in v if n not in shown]
@@ -638,7 +612,7 @@ def main():
         extra = paras(text) if cmd in ('stop', 'done') else []
         if cmd == 'answer':
             extra = ['<p>Ответ получен — он в разделе <a href="#qa">«Вопросы и ответы»</a>.</p>']
-        page, cur, _ = render_common(page, state, task_file, log, task, now, extra, root, pages / task, frames)
+        page, cur, _ = render_common(page, state, task_file, log, task, now, extra, root, pages / task)
         if cmd == 'iteration' and text.strip():
             page = put(page, 'its-note', [f'<p class="note">{esc(" ".join(text.split()))}</p>'])
         if cmd == 'question':
@@ -653,39 +627,17 @@ def main():
                           f'  <p><span class="kind">Ответ {who}</span> {esc(a["a"])}</p>', '</details>']
             old = get(page, 'qa')
             page = put(page, 'qa', items + ([] if old == [NO_QA] else old))
-        # копии картинок — после разбора всего текста: ошибка в нём оставляет страницу и папку картинок прежними;
-        # в ответ скрипта — все картинки вопроса: их несёт каждая публикация вопроса, и до страницы доходят
-        # картинки сорвавшейся публикации и картинки, оставшиеся на прежнем адресе страницы
+        # копии картинок — после разбора всего текста: ошибка в нём оставляет страницу и папку картинок прежними
         for copy, body in copies.items():
             if not copy.exists():
                 copy.parent.mkdir(exist_ok=True)
                 copy.write_bytes(body)
-            uploads[f'{copy.parent.name}/{copy.name}'] = str(copy.relative_to(root))
         file.write_text(page)
         changed = [m for m in MARKS if page[slice(*span(page, m)[:2])] != before[slice(*span(before, m)[:2])]]
         what = 'изменено: ' + ', '.join(changed) if changed else 'без изменений'
-    # в публикацию события — файлы кадров без отметки sent и отмеченные файлы, которых страница больше не показывает, —
-    # со значением null, публикация убирает их; убранные — вперёд новых: версия страницы держит до 511 файлов.
-    # Файл уходит, пока публикация с ним не пройдёт, отправленные следующие публикации не несут
-    out, rest = {}, 0
-    if cmd != 'new':
-        shown = {f'{c.parent.name}/{c.name}': str(c.relative_to(root)) for c in sorted(frames)}
-        out = {s: None for s in sorted(sent - shown.keys())} | {k: v for k, v in shown.items() if k not in sent}
-        room = FILES - len(uploads)
-        out, rest = dict(list(out.items())[:room]), max(len(out) - room, 0)
-        if out:
-            sending.write_text(json.dumps(out, ensure_ascii=False))
-        uploads.update(out)
-    files = f'картинки — в files публикации: {json.dumps(uploads, ensure_ascii=False)}; ' if uploads else ''
-    if out:
-        files += 'после удачной публикации — команда sent; '
-    if rest:
-        # после done событий нет: остаток несут повторы done, которые оркестратор делает сам
-        then = 'повтором done после публикации и sent' if cmd == 'done' else 'со следующим событием'
-        files += f'ещё {rest} {plural(rest, "файл", "файла", "файлов")} кадров — {then}; '
     if lost:
-        files += f'вопрос на странице без картинок — нет такого файла картинки в папке проекта: {", ".join(lost)}; '
-    print(f'{rel}: {what}; {files}' + (f'адрес — {url}' if url else 'адреса нет — первая публикация'))
+        what += f'; вопрос на странице без картинок — нет такого файла картинки в папке проекта: {", ".join(lost)}'
+    print(f'{rel}: {what}; адрес — {file.as_uri()}')
 
 
 # текст оркестратора без нужного поля или с полем не того вида — ошибка вызова, файл страницы остаётся прежним

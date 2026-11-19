@@ -1,3 +1,6 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <!-- page:title -->
 <title>export-csv · Учёт расходов</title>
 <!-- /page:title -->
@@ -437,4 +440,21 @@ tape.addEventListener('pointermove', e => {
 });
 // конец перетаскивания — отпускание кнопки и потеря захвата указателя
 tape.addEventListener('lostpointercapture', () => { grip = null; });
+// самообновление: раз в 30 секунд страница перечитывает свой файл и показывает новые события оркестратора; прокрутку
+// возвращает браузер, раскрытые блоки код раскрывает снова по тексту подписи — список живёт в хранилище вкладки, без него
+// блоки после перечитывания свёрнуты; открытый просмотр картинки откладывает перечитывание до своего закрытия
+const opened = 'opened:' + location.pathname;
+const blocks = () => [...document.querySelectorAll('details')];
+const caption = d => d.querySelector('summary')?.textContent;
+try {
+  const was = JSON.parse(sessionStorage.getItem(opened) || '[]');
+  blocks().forEach(d => { if (was.includes(caption(d))) d.open = true; });
+} catch {}
+setInterval(() => {
+  if (view.open) return;
+  try {
+    sessionStorage.setItem(opened, JSON.stringify(blocks().filter(d => d.open).map(caption)));
+  } catch {}
+  location.reload();
+}, 30000);
 </script>
