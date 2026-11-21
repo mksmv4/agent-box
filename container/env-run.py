@@ -14,6 +14,8 @@ NAME = re.compile(r'[_a-z][_a-z0-9]*', re.I)
 # ключи входа и переключатели провайдера: Claude Code в контейнере работает по подписке, программы агента их тоже не видят
 LOGIN = ('ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN',
          'CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX', 'CLAUDE_CODE_USE_FOUNDRY')
+# ключ итерации agent-loop.sh --api: движок кладёт его в окружение контейнера под этим именем, Claude Code получает его как ANTHROPIC_API_KEY
+API_KEY = 'CLAUDE_BOX_API_KEY'
 
 
 class EnvError(Exception):
@@ -171,8 +173,11 @@ def main():
         sys.exit(f'claude-box: {path}: {e}')
     # имена, уже заданные образом, compose-файлом и движком, .env не перекрывает
     env = {**values, **env}
-    for k in LOGIN:
+    for k in LOGIN + (API_KEY,):
         env.pop(k, None)
+    # ключ --api — только из окружения контейнера: строка в .env его не задаёт
+    if os.environ.get(API_KEY):
+        env['ANTHROPIC_API_KEY'] = os.environ[API_KEY]
     os.execvpe(cmd[0], cmd, env)
 
 

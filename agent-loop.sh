@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # Движок автоцикла: итерации /box-next по задаче проекта, пока статус таск-файла «в работе» или «блокер» с ответом пользователя.
-# Запуск на хосте из папки проекта: agent-loop.sh [--host | --no-firewall] [--quiet] [--resume <id>] <задача>; из любой папки — путём к таск-файлу: agent-loop.sh [--host | --no-firewall] [--quiet] [--resume <id>] <проект>/docs/tasks/<задача>.md
+# Запуск на хосте из папки проекта: agent-loop.sh [--host | --no-firewall] [--api] [--quiet] [--resume <id>] <задача>; из любой папки — путём к таск-файлу: agent-loop.sh [--host | --no-firewall] [--api] [--quiet] [--resume <id>] <проект>/docs/tasks/<задача>.md
 # --resume <id> — первая итерация запуска продолжает сессию, оборванную сбоем сети, API или лимитом подписки; дальше цикл идёт свежими сессиями.
 # Первый раз на машине — ./agent-loop.sh в папке клона: скрипт ставит себя и box-connect командами ссылками в ~/.local/bin.
 # Итерации идут в контейнере — сервисе claude из claude-box.yml проекта: сеть ограничена списком адресов, режим без вопросов о разрешениях;
 # --no-firewall — сеть контейнера открыта, режим auto; --host — итерации claude хоста в режиме auto.
+# --api — итерации на API-ключе из строки ANTHROPIC_API_KEY в ~/.config/agent-loop.env: расход идёт с API-кредитов организации Console; строки нет — отказ запуска.
+# Без флага, а интерактивные сессии всегда, Claude Code работает по подписке.
 # Уведомления в Telegram — при TELEGRAM_BOT_TOKEN и TELEGRAM_CHAT_ID в ~/.config/agent-loop.env, иначе остановки видны только в терминале;
 # --quiet — остановки только в терминале и при настроенном боте.
 # Журнал цикла — .git/agent-loop.log проекта, путь — в строке старта: запуски, итерации с ходом сессии, остановки.
@@ -119,11 +121,12 @@ if ! command -v agent-loop.sh >/dev/null || ! command -v box-connect >/dev/null;
   esac
 fi
 
-host= open= quiet= resume_id=
+host= open= api= quiet= resume_id=
 while :; do
   case ${1:-} in
     --host) host=1 ;;
     --no-firewall) open=1 ;;
+    --api) api=1 ;;
     --quiet) quiet=1 ;;
     --resume)
       [[ ${2:-} =~ ^[0-9a-f-]{36}$ ]] || stop 2 "--resume ждёт id сессии, получено «${2:-}»"
@@ -134,10 +137,10 @@ while :; do
   esac
   shift
 done
-usage="запуск: $me [--host | --no-firewall] [--quiet] [--resume <id>] <задача> из папки проекта или $me [--host | --no-firewall] [--quiet] [--resume <id>] <путь к таск-файлу> из любой папки; правило песочницы claude-box для сессии Claude хоста — $me --sandbox-rule"
+usage="запуск: $me [--host | --no-firewall] [--api] [--quiet] [--resume <id>] <задача> из папки проекта или $me [--host | --no-firewall] [--api] [--quiet] [--resume <id>] <путь к таск-файлу> из любой папки; правило песочницы claude-box для сессии Claude хоста — $me --sandbox-rule"
 [ $# -eq 0 ] && { say "$usage"; exit 0; }
 if [ "$1" = --sandbox-rule ]; then
-  [ $# -eq 1 ] && [ -z "$host$open$quiet$resume_id" ] || { echo "$usage" >&2; exit 2; }
+  [ $# -eq 1 ] && [ -z "$host$open$api$quiet$resume_id" ] || { echo "$usage" >&2; exit 2; }
   sandbox_rule
 fi
 [ $# -eq 1 ] && [ -n "$1" ] || { echo "$usage" >&2; exit 2; }
@@ -153,7 +156,7 @@ case $1 in
   *) task=$1 ;;
 esac
 target=${path:-$task}
-again="$me${host:+ --host}${open:+ --no-firewall}${quiet:+ --quiet} $target"
+again="$me${host:+ --host}${open:+ --no-firewall}${api:+ --api}${quiet:+ --quiet} $target"
 run=docker
 [ -z "$host" ] || run=claude
 for cmd in git jq "$run"; do
@@ -227,7 +230,8 @@ if [ -z "$host" ]; then
   fi
 fi
 
-# токен и chat_id — из файла вне репозиториев; берутся только эти две строки, в окружение сессий они не попадают.
+# токен, chat_id и ключ API — из файла вне репозиториев; берутся только эти три строки. Токен и chat_id в окружение сессий не попадают,
+# ключ получают только итерации запуска с --api.
 # Токен проверяется запросом getMe до первой итерации, пока пользователь у терминала: неверный токен вида <число>:<ключ>
 # Telegram отклоняет ответом 401 «Unauthorized», токен другого вида — 404 «Not Found»; прочий сбой проверки уведомления не выключает.
 # chat_id, которого нет в файле, берётся из последнего сообщения боту и дописывается в файл.
@@ -237,9 +241,28 @@ if [ -f "$env" ]; then
   while IFS='=' read -r key value || [ -n "$key" ]; do
     value=${value#[\"\']}
     value=${value%[\"\']}
-    case $key in TELEGRAM_BOT_TOKEN | TELEGRAM_CHAT_ID) printf -v "$key" %s "$value" ;; esac
+    case $key in
+      TELEGRAM_BOT_TOKEN | TELEGRAM_CHAT_ID) printf -v "$key" %s "$value" ;;
+      ANTHROPIC_API_KEY) api_key=$value ;;
+    esac
   done <"$env"
 fi
+
+# ключ API итераций с --api: на хосте — ANTHROPIC_API_KEY в окружении claude; в контейнер — под именем CLAUDE_BOX_API_KEY через -e без значения:
+# Compose берёт значение из окружения движка, в тексте команды и списке процессов ключа нет; claude-box-env отдаёт его Claude Code как ANTHROPIC_API_KEY.
+# Строки ключа нет — отказ запуска: итерация без ключа тратит лимит подписки, а флаг обещает расход с кредитов
+keyenv=()
+if [ -n "$api" ]; then
+  [ -n "${api_key:-}" ] || stop 2 "--api: в $env нет строки ANTHROPIC_API_KEY — допиши ANTHROPIC_API_KEY=<ключ из Console> или запусти без --api"
+  if [ -n "$host" ]; then
+    export ANTHROPIC_API_KEY=$api_key
+  else
+    export CLAUDE_BOX_API_KEY=$api_key
+    keyenv=(-e CLAUDE_BOX_API_KEY)
+  fi
+  say "итерации на API-ключе из $env: расход — с API-кредитов организации Console"
+fi
+
 if [ -n "$quiet" ]; then
   say "уведомления в Telegram выключены флагом --quiet: остановки — только в терминале"
 elif [ -n "${TELEGRAM_BOT_TOKEN:-}" ]; then
@@ -426,7 +449,7 @@ $services"
   if [ -n "$host" ]; then
     CONTEXT_GUARD_MODE=protocol CLAUDE_CODE_PROMPT_CACHE_TTL=5m claude "${args[@]}"
   else
-    docker compose -f "$cf" --progress quiet run --rm -T "${fw[@]}" -e CONTEXT_GUARD_MODE=protocol -e CLAUDE_CODE_PROMPT_CACHE_TTL=5m claude "${args[@]}" </dev/null
+    docker compose -f "$cf" --progress quiet run --rm -T "${fw[@]}" -e CONTEXT_GUARD_MODE=protocol -e CLAUDE_CODE_PROMPT_CACHE_TTL=5m "${keyenv[@]}" claude "${args[@]}" </dev/null
   fi >"$tmp/out" 2>"$tmp/err"
   code=$?
   kill "$timer" 2>/dev/null
