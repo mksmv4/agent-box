@@ -15,6 +15,7 @@
   - [ ] [page-script](tasks/page-script.md)
   - [ ] [qa-frames](tasks/qa-frames.md)
   - [ ] [orchestrator-helper](tasks/orchestrator-helper.md)
+  - [ ] [loop-api](tasks/loop-api.md)
 - [ ] Страница задачи для возвращения в контекст — пользователь, открывший страницу задачи оркестратора через несколько часов, сразу понимает, что за задача, где она сейчас и какое решение от него ждут, а подробности находит навигацией. Сначала ресерч по жалобе пользователя на страницу задачи sandbox-rule 2026-10-12, затем переделка правил страниц и примеров по его итогам.
   - [ ] [page-research](tasks/page-research.md)
   - [ ] [page-rules](tasks/page-rules.md)
