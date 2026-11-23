@@ -9,26 +9,26 @@
 - [ ] Релиз — публикация образа `maksim44/claude-box` публичным репозиторием на Docker Hub — `docker push maksim44/claude-box`, на других машинах образ приходит `docker compose pull claude` вместо сборки, — ведёт пользователь; хук context-guard — скрипт и правило «сигнал выполнять как инструкцию» — в образ, сейчас они берутся из личной `~/.claude` хоста; образ под arm64 для Mac на Apple Silicon — `docker buildx build --platform linux/amd64,linux/arm64 … --push` на машине сборки с эмуляцией arm64, сейчас образ только amd64; проверка запуска на macOS и Windows. Открытые вопросы — § Релиз ниже.
 - [ ] Авторешение блокеров — следующая ступень автоцикла, после движка и накопления десятков решений в `DECISIONS.md` проектов; план — § Авторешение блокеров — план ниже.
 - [ ] Сессия хоста над движком — интерактивная сессия Claude Code на хосте в режиме auto запускает движок и сессии в контейнере проекта без отказов классификатора: правило песочницы claude-box в исключениях классификатора личных настроек, ставит человек (`researches/2026-10-10-auto-mode-host.md`). Вместе с ним — личные данные в git проектов только по согласию пользователя. Оркестратор — скилл проекта: сессия хоста ведёт задачу движком, вопросы пользователю приходят пушем через Remote Control (`researches/2026-10-10-orchestrator-remote.md`).
-  - [ ] [sandbox-rule](tasks/sandbox-rule.md)
-  - [ ] [orchestrator](tasks/orchestrator.md)
-  - [ ] [orchestrator-context](tasks/orchestrator-context.md)
-  - [ ] [page-script](tasks/page-script.md)
-  - [ ] [qa-frames](tasks/qa-frames.md)
-  - [ ] [orchestrator-helper](tasks/orchestrator-helper.md)
-  - [ ] [loop-api](tasks/loop-api.md)
+  - [x] [sandbox-rule](tasks/sandbox-rule.md)
+  - [x] [orchestrator](tasks/orchestrator.md)
+  - [x] [orchestrator-context](tasks/orchestrator-context.md)
+  - [x] [page-script](tasks/page-script.md)
+  - [x] [qa-frames](tasks/qa-frames.md)
+  - [x] [orchestrator-helper](tasks/orchestrator-helper.md)
+  - [x] [loop-api](tasks/loop-api.md)
 - [ ] Страница задачи для возвращения в контекст — пользователь, открывший страницу задачи оркестратора через несколько часов, сразу понимает, что за задача, где она сейчас и какое решение от него ждут, а подробности находит навигацией. Сначала ресерч по жалобе пользователя на страницу задачи sandbox-rule 2026-10-12, затем переделка правил страниц и примеров по его итогам.
-  - [ ] [page-research](tasks/page-research.md)
-  - [ ] [page-rules](tasks/page-rules.md)
+  - [x] [page-research](tasks/page-research.md)
+  - [x] [page-rules](tasks/page-rules.md)
 - [ ] Обвязка в рабочем проекте — сервис Claude живёт в отдельном файле под `.gitignore` проекта и в git и деплой проекта не попадает; проект в дополнительной рабочей копии git работает в контейнере. Поводы — пилотный проект 2026-10-14: сервис в compose-файле проекта уезжает на прод, `/box-init` в рабочей копии остановился без git (`researches/2026-10-14-compose-local.md`).
-  - [ ] [compose-local](tasks/compose-local.md)
-  - [ ] [compose-net](tasks/compose-net.md)
+  - [x] [compose-local](tasks/compose-local.md)
+  - [x] [compose-net](tasks/compose-net.md)
 - [ ] README для человека — по оглавлению `README.md` читатель находит свой сценарий и доходит до команд без подробностей устройства, факты README сходятся с кодом. Сначала анализ — как README должен быть устроен, — затем актуализация по его итогам. Повод — беседа 2026-10-14: порядка обновления заведённых проектов в README нет, а текста столько, что его не может прочитать сам автор.
-  - [ ] [readme](tasks/readme.md)
+  - [x] [readme](tasks/readme.md)
 - [ ] Области и настройки проекта — проект с несколькими разработчиками и разросшейся документацией: архитектура и правила делятся по областям кода, правила области подгружаются только сессии, которая трогает её код; журнал и реестр решений сливаются между ветками без конфликтов; пределы движка и порог раздела — в одном конфиге agent-box на все проекты. Одиночный проект работает как раньше. Повод — беседа 2026-10-14 о пилотном проекте с двумя разработчиками, фронт и бэк.
-  - [ ] [areas-config](tasks/areas-config.md)
-  - [ ] [rakes-architecture](tasks/rakes-architecture.md)
+  - [x] [areas-config](tasks/areas-config.md)
+  - [x] [rakes-architecture](tasks/rakes-architecture.md)
 - [ ] Ресерч и проверка постановки при заведении задачи — заводя задачу, Claude отдельными пунктами предлагает ресерч практик и проверку постановки; принятые идут первыми этапами очереди, правки задачи приходят пользователю один раз, после проверки. Повод — беседа 2026-11-16.
-  - [ ] [task-research-check](tasks/task-research-check.md)
+  - [x] [task-research-check](tasks/task-research-check.md)
 - [ ] Общие правила вместо частных — сбой, который правило протокола или скилла образца ловит в одном месте, ловится везде, где он возможен: узкие правила, привязанные к месту, где сбой увидели, сведены в общие.
   - [ ] [general-rules](tasks/general-rules.md)
 
