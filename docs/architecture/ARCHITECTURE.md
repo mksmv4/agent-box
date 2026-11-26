@@ -35,6 +35,7 @@
 - **Набор документов проекта описан в четырёх местах.** Карточки `skills/box-init/documents.md`, файлы `template/`, карта `template/docs/README.md` и очередь шаблона задачи сборки в `skills/box-init/SKILL.md`; новый или убранный документ правит все четыре.
 - **Хук — по имени файла.** Регистрация в `container/settings.json` и проверка в скрипте запуска ссылаются на `~/.claude/hooks/context-guard.sh`; режим хук читает из `CONTEXT_GUARD_MODE` и `.claude/context-guard.conf` корня проекта.
 - **Образ собирается из корня репозитория:** Dockerfile копирует `template/` и `skills/`.
+- **Файлы agent-box в проекте — пути и список в `box-update`.** Скрипт кладёт свежей копией и сверяет по манифесту `docs/PROTOCOL.md`, `.claude/context-guard.conf` и папки `.claude/skills/box-*/` образца: новый файл agent-box вне этих путей правит их в скрипте. Правило запрета, убранное из `template/.claude/settings.json`, дописывается в список правил прежнего образца в скрипте: по нему `box-update` убирает правило из проектов (`template.md` § Обновление проекта).
 
 ## Анти-паттерны
 
@@ -54,5 +55,5 @@
 
 - `engine` — `agent-loop.sh`, `box-connect`, `config.yml`: движок автоцикла и его конфиг — `engine.md`
 - `orchestrator` — `template/.claude/skills/box-orchestrate/`: сессия хоста, которая ведёт задачу движком, и страница задачи — `orchestrator.md`
-- `template` — `template/` без папки оркестратора, `skills/`: образец проекта и скиллы контейнера — `template.md`
+- `template` — `template/` без папки оркестратора, `skills/`, `box-update`: образец проекта, скиллы контейнера и обновление проекта — `template.md`
 - `container` — `container/`, `compose.yml`, хук context-guard в `~/.claude` хоста: образ и скрипт запуска, ступени изоляции, хук — `container.md`

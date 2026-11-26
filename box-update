@@ -1,0 +1,261 @@
+#!/usr/bin/env bash
+# Обновление обвязки agent-box в проекте: файлы agent-box — свежей копией из последнего коммита клона, заготовки — на первом запуске,
+# недостающие строки .gitignore и .gitattributes и правила запрета .claude/settings.json; манифест сумм и коммит.
+# Запуск на хосте в корне проекта: box-update [--force]; команду ставит ./agent-loop.sh в папке клона ссылкой в ~/.local/bin.
+# Файлы agent-box — docs/PROTOCOL.md, .claude/context-guard.conf, папки .claude/skills/box-*/; их суммы и коммит клона — манифест .claude/agent-box.sha256.
+# Файл agent-box, правленный в проекте, останавливает обновление без правок; --force кладёт свежую копию поверх правки.
+# Код выхода: 0 — обновлено или нечего обновлять; 1 — остановка без правок; 2 — неверный запуск или нет нужной команды.
+set -euo pipefail
+
+say() { printf 'box-update: %s\n' "$*"; }
+list() { printf '  %s\n' "$@"; }
+
+# git по репозиторию проекта: команда fsmonitor и хуки из его .git выключены — их может подложить агент контейнера
+g() { git -c core.fsmonitor=false -c core.hooksPath=/dev/null "$@"; }
+
+force=
+case $# in
+  0) ;;
+  1) [ "$1" = --force ] || { say "запуск: box-update [--force]"; exit 2; }; force=1 ;;
+  *) say "запуск: box-update [--force]"; exit 2 ;;
+esac
+for cmd in git jq sha256sum tar; do
+  command -v "$cmd" >/dev/null || { say "нет команды $cmd"; exit 2; }
+done
+
+# клон — папка скрипта: команда ведёт в него ссылкой из ~/.local/bin
+clone=$(dirname "$(readlink -f "$0")")
+if [ -f agent-loop.sh ] && [ -d template ]; then
+  say "это клон agent-box: протокол и скиллы здесь — ссылки на оригиналы в template/, копия легла бы на сами оригиналы"
+  exit 1
+fi
+
+# проект — текущая папка: пустая становится git-репозиторием, с файлами без git — остановка
+if [ ! -e .git ]; then
+  if [ -n "$(ls -A)" ]; then
+    say "в папке нет git-репозитория, а файлы есть: что уйдёт в git первым коммитом, решаешь ты."
+    say "сделай первый коммит проекта и запусти box-update снова; запуск — в корне проекта"
+    exit 1
+  fi
+  g init -q
+  say "пустая папка стала git-репозиторием"
+fi
+
+manifest=.claude/agent-box.sha256
+first= fresh=
+if [ ! -f "$manifest" ]; then
+  first=1
+  # проект прежней схемы — задача сборки документации уже заведена: его заготовки — документы проекта
+  compgen -G 'docs/tasks/docs-*.md' >/dev/null || fresh=1
+fi
+
+# чистое дерево; правки пользователя в таск-файлах — ответ на блокер, правка «Постановки» — остаются вне коммита
+keep=() bad=()
+while IFS= read -r -d '' e; do
+  p=${e:3}
+  if [ -z "$fresh" ] && [[ $p == docs/tasks/* ]]; then keep+=("$p"); else bad+=("$p"); fi
+  case ${e:0:2} in R* | C* | ?R | ?C) IFS= read -r -d '' p; bad+=("$p") ;; esac
+done < <(g status --porcelain -z -uall)
+if ((${#bad[@]})); then
+  say "в проекте правки без коммита — закоммить их и запусти box-update снова:"
+  list "${bad[@]}"
+  exit 1
+fi
+if [ -f .claude/settings.json ] && ! jq -e . .claude/settings.json >/dev/null 2>&1; then
+  say ".claude/settings.json — не JSON: правила запрета дописать некуда; почини файл и запусти box-update снова"
+  exit 1
+fi
+
+# образец — из последнего коммита клона: правки клона без коммита в проект не уходят
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+rev=$(git -C "$clone" rev-parse HEAD)
+git -C "$clone" archive "$rev" template | tar -x -C "$tmp"
+t=$tmp/template
+[ -z "$(git -C "$clone" status --porcelain -- template)" ] ||
+  say "в клоне agent-box правки template/ без коммита — в проект ложится коммит ${rev:0:7}"
+
+# файлы agent-box образца и заготовки — остальные файлы образца, кроме строк, настроек и claude-box.yml
+(cd "$t" && find docs/PROTOCOL.md .claude/context-guard.conf .claude/skills/box-* -type f | LC_ALL=C sort) >"$tmp/box.list"
+(cd "$t" && find . -type f | cut -c3- | LC_ALL=C sort) |
+  grep -vxF -f "$tmp/box.list" |
+  grep -vxE '\.gitignore|\.gitattributes|\.claude/settings\.json|claude-box\.yml' >"$tmp/skel.list" || true
+
+# прежний манифест: строка коммита и суммы файлов
+: >"$tmp/old.sums"
+[ -z "$first" ] && grep -v '^#' "$manifest" >"$tmp/old.sums" || true
+# папки box-* прежней версии и образца — целиком принадлежат обвязке
+dirs=$( { cut -d' ' -f3 "$tmp/old.sums"; cat "$tmp/box.list"; } | grep '^\.claude/skills/box-' | cut -d/ -f1-3 | LC_ALL=C sort -u)
+
+# пути записи и удаления — внутри папки проекта: скрипт работает на хосте, а ссылку в проекте мог подложить агент контейнера
+root=$(pwd -P)
+for p in $(cat "$tmp/box.list") $(cut -d' ' -f3 "$tmp/old.sums") $dirs .gitignore .gitattributes .claude/settings.json "$manifest" \
+  $(while IFS= read -r p; do [ -e "$p" ] || [ -L "$p" ] || echo "$p"; done <"$tmp/skel.list"); do
+  case $(realpath -m -- "$p") in
+    "$root"/*) ;;
+    *) say "путь ведёт ссылкой за папку проекта: $p — убери ссылку и запусти box-update снова"; exit 1 ;;
+  esac
+done
+
+# правки проекта в файлах agent-box: сумма разошлась, файл убран или добавлен в папку box-*
+edits=()
+while read -r sum p; do
+  if [ ! -f "$p" ]; then
+    edits+=("$p — убран")
+  elif [ "$(sha256sum <"$p" | cut -c1-64)" != "$sum" ]; then
+    edits+=("$p — изменён")
+  fi
+done <"$tmp/old.sums"
+if [ -z "$first" ]; then
+  for d in $dirs; do
+    [ -d "$d" ] || continue
+    while IFS= read -r p; do
+      cut -d' ' -f3 "$tmp/old.sums" | grep -qxF -- "$p" || edits+=("$p — добавлен")
+    done < <(find "$d" -type f | LC_ALL=C sort)
+  done
+fi
+if ((${#edits[@]})) && [ -z "$force" ]; then
+  say "файлы agent-box правлены в проекте — свежая копия легла бы поверх правки:"
+  list "${edits[@]}"
+  say "перенеси правку в docs/RULES.md правилом «вместо PROTOCOL.md § <раздел>: …» или «к /box-… шаг <N>: …»"
+  say "и запусти box-update --force: свежая копия ляжет поверх, прежний текст останется в истории git"
+  exit 1
+fi
+
+# первый запуск нового проекта: занятые имена заготовок, файлов agent-box и раздела по областям — в .old, .old2…
+renamed=() hidden=()
+oldname() {
+  local n=$1.old i=2
+  while [ -e "$n" ] || [ -L "$n" ]; do n=$1.old$i; i=$((i + 1)); done
+  printf '%s' "$n"
+}
+if [ -n "$fresh" ]; then
+  for p in $(grep -vE '^docs/(tasks|researches)/' "$tmp/skel.list") docs/PROTOCOL.md .claude/context-guard.conf \
+    docs/tasks docs/researches docs/architecture docs/rules; do
+    [ -e "$p" ] || [ -L "$p" ] || continue
+    n=$(oldname "$p")
+    if g check-ignore -q "$p"; then hidden+=("/$n"); fi
+    mv "$p" "$n"
+    renamed+=("$p → $n")
+  done
+fi
+
+# состояние файлов agent-box до копии — для итога
+units=$(printf '%s\n' docs/PROTOCOL.md .claude/context-guard.conf $dirs)
+unit_sum() { [ -e "$1" ] && find "$1" -type f | LC_ALL=C sort | xargs -r -d '\n' sha256sum | sha256sum | cut -c1-64 || true; }
+declare -A before
+for u in $units; do before[$u]=$(unit_sum "$u"); done
+
+# файлы agent-box: прежние файлы манифеста и папки box-* — прочь, образец — свежей копией
+cut -d' ' -f3 "$tmp/old.sums" | while IFS= read -r p; do rm -f -- "$p"; done
+for d in $dirs; do rm -rf -- "$d"; done
+while IFS= read -r p; do
+  mkdir -p "$(dirname "$p")"
+  rm -f -- "$p"
+  cp "$t/$p" "$p"
+done <"$tmp/box.list"
+
+# заготовки — на первом запуске, только недостающие; при разделе по областям основной файл живёт в папке раздела
+laid=()
+if [ -n "$first" ]; then
+  while IFS= read -r p; do
+    [ -e "$p" ] || [ -L "$p" ] && continue
+    [ "$p" = docs/RULES.md ] && [ -d docs/rules ] && continue
+    [ "$p" = docs/ARCHITECTURE.md ] && [ -d docs/architecture ] && continue
+    mkdir -p "$(dirname "$p")"
+    cp "$t/$p" "$p"
+    laid+=("$p")
+  done <"$tmp/skel.list"
+fi
+
+# строки: недостающие строки файла образца — в конец, с комментариями над ними в образце; файла нет — копия образца
+declare -A added
+add_lines() {
+  local f=$1 line com=()
+  if [ ! -e "$f" ]; then
+    cp "$t/$f" "$f"
+    added[$f]="копия образца"
+    return
+  fi
+  while IFS= read -r line || [ -n "$line" ]; do
+    case $line in
+      '#'*) com+=("$line"); continue ;;
+      '') com=(); continue ;;
+    esac
+    if ! grep -qxF -- "$line" "$f"; then
+      [ -z "$(tail -c1 "$f")" ] || echo >>"$f"
+      printf '%s\n' "${com[@]}" "$line" >>"$f"
+      added[$f]+="${added[$f]:+, }$line"
+    fi
+    com=()
+  done <"$t/$f"
+}
+add_lines .gitignore
+add_lines .gitattributes
+if ((${#hidden[@]})); then
+  printf '%s\n' '# сборка документации: бывшее под gitignore' "${hidden[@]}" >>.gitignore
+  added[.gitignore]+="${added[.gitignore]:+, }${hidden[*]}"
+fi
+
+# правила запрета: недостающие правила образца — дописать, правила прежнего образца на правку compose-файлов — убрать
+old_rules='["Edit(/compose.yaml)","Edit(/compose.yml)","Edit(/docker-compose.yaml)","Edit(/docker-compose.yml)",
+  "Edit(/compose.override.yaml)","Edit(/compose.override.yml)","Edit(/docker-compose.override.yaml)","Edit(/docker-compose.override.yml)"]'
+rules_in= rules_out=
+s=.claude/settings.json
+if [ ! -e "$s" ]; then
+  cp "$t/$s" "$s"
+  rules_in="копия образца"
+else
+  tpl=$(jq -c '.permissions.deny' "$t/$s")
+  rules_in=$(jq -r --argjson tpl "$tpl" '$tpl - (.permissions.deny // []) | join(", ")' "$s")
+  rules_out=$(jq -r --argjson old "$old_rules" '[(.permissions.deny // [])[] | select(IN($old[]))] | join(", ")' "$s")
+  if [ -n "$rules_in$rules_out" ]; then
+    jq --argjson tpl "$tpl" --argjson old "$old_rules" \
+      '(.permissions.deny // []) as $d | .permissions.deny = (($d - $old) + ($tpl - $d))' "$s" >"$tmp/settings.json"
+    cat "$tmp/settings.json" >"$s"
+  fi
+fi
+
+# манифест: коммит клона и суммы файлов agent-box
+{
+  printf '# agent-box %s\n' "$rev"
+  xargs -d '\n' sha256sum <"$tmp/box.list"
+} >"$tmp/manifest"
+
+# правки обновления — без таск-файлов пользователя и манифеста; правок нет и манифест есть — коммита нет
+ex=()
+for p in "${keep[@]}"; do ex+=(":(exclude,literal)$p"); done
+if [ -z "$first" ] && [ -z "$(g status --porcelain -uall -- . "${ex[@]}" ":(exclude,literal)$manifest")" ]; then
+  say "обвязка свежая — agent-box ${rev:0:7}, правок нет, коммита нет"
+  exit 0
+fi
+cp "$tmp/manifest" "$manifest"
+
+# итог
+[ -z "$first" ] || { [ -n "$fresh" ] && say "первый запуск в проекте" || say "первый запуск в проекте прежней схемы: файлы agent-box — свежей копией, документы остаются как есть"; }
+((${#edits[@]} == 0)) || { say "правки проекта в файлах agent-box легли под свежую копию (--force):"; list "${edits[@]}"; }
+((${#renamed[@]} == 0)) || { say "занятые имена переименованы:"; list "${renamed[@]}"; }
+new=() upd=() gone=()
+for u in $units; do
+  a=$(unit_sum "$u")
+  if [ -z "${before[$u]}" ] && [ -n "$a" ]; then new+=("$u")
+  elif [ -n "${before[$u]}" ] && [ -z "$a" ]; then gone+=("$u")
+  elif [ "${before[$u]}" != "$a" ]; then upd+=("$u")
+  fi
+done
+((${#new[@]} == 0)) || { say "файлы agent-box легли впервые:"; list "${new[@]}"; }
+((${#upd[@]} == 0)) || { say "файлы agent-box обновлены:"; list "${upd[@]}"; }
+((${#gone[@]} == 0)) || { say "файлы agent-box убраны — их нет в новой версии:"; list "${gone[@]}"; }
+((${#laid[@]} == 0)) || { say "заготовки легли:"; list "${laid[@]}"; }
+for f in .gitignore .gitattributes; do
+  [ -z "${added[$f]:-}" ] || say "$f: ${added[$f]}"
+done
+[ -z "$rules_in" ] || say ".claude/settings.json, правила запрета дописаны: $rules_in"
+[ -z "$rules_out" ] || say ".claude/settings.json, правила прежнего образца убраны: $rules_out"
+ign=$({ cat "$tmp/box.list"; printf '%s\n' "${laid[@]}" "$manifest"; } | g check-ignore --stdin || true)
+[ -z "$ign" ] || { say "под .gitignore проекта — в git не попадут:"; list $ign; }
+
+g add -A -- . "${ex[@]}"
+g commit -q -m "chore(box): agent-box ${rev:0:7}"
+say "коммит $(g rev-parse --short HEAD) chore(box): agent-box ${rev:0:7}"
+((${#keep[@]} == 0)) || { say "правки таск-файлов остались вне коммита:"; list "${keep[@]}"; }
