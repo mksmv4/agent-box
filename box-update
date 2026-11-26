@@ -4,6 +4,8 @@
 # Запуск на хосте в корне проекта: box-update [--force]; команду ставит ./agent-loop.sh в папке клона ссылкой в ~/.local/bin.
 # Файлы agent-box — docs/PROTOCOL.md, .claude/context-guard.conf, папки .claude/skills/box-*/; их суммы и коммит клона — манифест .claude/agent-box.sha256.
 # Файл agent-box, правленный в проекте, останавливает обновление без правок; --force кладёт свежую копию поверх правки.
+# claude-box.yml — сервис claude этой машины, вне git: собирается из образца и docker compose config проекта, его сумма — последней строкой файла;
+# правка руками, кроме строк CLAUDE_BOX_ALLOW и ANTHROPIC_MODEL, останавливает обновление, --force кладёт свежий файл, прежний — в claude-box.yml.old.
 # Код выхода: 0 — обновлено или нечего обновлять; 1 — остановка без правок; 2 — неверный запуск или нет нужной команды.
 set -euo pipefail
 
@@ -19,7 +21,7 @@ case $# in
   1) [ "$1" = --force ] || { say "запуск: box-update [--force]"; exit 2; }; force=1 ;;
   *) say "запуск: box-update [--force]"; exit 2 ;;
 esac
-for cmd in git jq sha256sum tar; do
+for cmd in git jq sha256sum tar docker; do
   command -v "$cmd" >/dev/null || { say "нет команды $cmd"; exit 2; }
 done
 
@@ -89,13 +91,76 @@ dirs=$( { cut -d' ' -f3 "$tmp/old.sums"; cat "$tmp/box.list"; } | grep '^\.claud
 
 # пути записи и удаления — внутри папки проекта: скрипт работает на хосте, а ссылку в проекте мог подложить агент контейнера
 root=$(pwd -P)
-for p in $(cat "$tmp/box.list") $(cut -d' ' -f3 "$tmp/old.sums") $dirs .gitignore .gitattributes .claude/settings.json "$manifest" \
+for p in $(cat "$tmp/box.list") $(cut -d' ' -f3 "$tmp/old.sums") $dirs .gitignore .gitattributes .claude/settings.json "$manifest" claude-box.yml \
   $(while IFS= read -r p; do [ -e "$p" ] || [ -L "$p" ] || echo "$p"; done <"$tmp/skel.list"); do
   case $(realpath -m -- "$p") in
     "$root"/*) ;;
     *) say "путь ведёт ссылкой за папку проекта: $p — убери ссылку и запусти box-update снова"; exit 1 ;;
   esac
 done
+
+# claude-box.yml — образец с именем проекта Compose, путём /workspace/<проект>, сетью по умолчанию проекта
+# и подключениями основного репозитория у дополнительной рабочей копии git; файл машины, поэтому сумма — в нём самом
+cb=claude-box.yml
+cbkeys='^[[:space:]]*(CLAUDE_BOX_ALLOW|ANTHROPIC_MODEL):'
+cb_sum() { grep -vE "^# box-update |$cbkeys" "$1" | sha256sum | cut -c1-64; }
+envkey() { [ -f .env ] && grep -Eq "^[[:space:]]*(export[[:space:]]+)?$1[[:space:]]*=" .env; }
+compose=
+for f in compose.yaml compose.yml docker-compose.yml docker-compose.yaml; do [ -f "$f" ] && compose=1; done
+envkey COMPOSE_FILE && compose=1
+cb_net= cb_svc= env_lines=
+if [ -n "$compose" ]; then
+  if envkey COMPOSE_PROJECT_NAME; then
+    say "в .env строка COMPOSE_PROJECT_NAME: она сильнее строки name: в claude-box.yml и вернёт Claude в проект основного compose-файла"
+    say "перенеси имя из этой строки в строку name: основного compose-файла и запусти box-update снова: проект сохранит имя, контейнеры и сеть"
+    exit 1
+  fi
+  # все профили — сеть по умолчанию есть в выводе и у проекта, чьи сервисы все под профилями; файлы env_file сервисов не читаются
+  if ! docker compose --profile '*' config --format json --no-env-resolution >"$tmp/compose.json" 2>"$tmp/compose.err"; then
+    say "docker compose config в проекте упал — имя проекта и сеть для claude-box.yml взять неоткуда:"
+    sed 's/^/  /' "$tmp/compose.err"
+    exit 1
+  fi
+  name=$(jq -r .name "$tmp/compose.json")
+  cb_net=$(jq -c '.networks.default // empty' "$tmp/compose.json")
+  # сервис claude прежней схемы в compose-файле проекта: его строки адресов и модели — в claude-box.yml, сам сервис убирает человек
+  if jq -e '.services.claude' "$tmp/compose.json" >/dev/null; then
+    cb_svc=1
+    env_lines=$(jq -r '.services.claude.environment // {} | to_entries[]
+      | select((.key == "CLAUDE_BOX_ALLOW" or .key == "ANTHROPIC_MODEL") and .value != null) | "\(.key): \(.value | @json)"' "$tmp/compose.json")
+  fi
+else
+  # без compose-файла — имя папки, приведённое, как в box-connect: путь в контейнере у обоих запусков один
+  name=$(basename "$PWD" | tr A-Z a-z | tr -cd 'a-z0-9_-' | sed 's/^[-_]*//')
+fi
+# прежний файл: строки адресов и модели переносятся как есть; без строки суммы — файл прежней схемы, остаётся рядом в .old
+cb_prev= cb_edit=
+if [ -e "$cb" ]; then
+  env_lines=$(grep -E "$cbkeys" "$cb" | sed 's/^[[:space:]]*//' || true)
+  rec=$(sed -n 's/^# box-update \([0-9a-f]\{64\}\) .*/\1/p' "$cb" | tail -1)
+  if [ -z "$rec" ]; then cb_prev=1
+  elif [ "$rec" != "$(cb_sum "$cb")" ]; then cb_edit=1
+  fi
+fi
+wt=
+if [ -f .git ]; then
+  gd=$(g rev-parse --path-format=absolute --git-common-dir)
+  wt=$(printf '      - %s\n' "$gd:$gd" "$gd/config:$gd/config:ro" "$gd/hooks:$gd/hooks:ro" "$gd/info:$gd/info:ro")
+fi
+NAME=$name NET=$cb_net WT=$wt \
+  MODEL=$(grep -m1 '^ANTHROPIC_MODEL:' <<<"$env_lines" || true) ALLOW=$(grep -m1 '^CLAUDE_BOX_ALLOW:' <<<"$env_lines" || true) awk '
+  /^# сеть по умолчанию/ && ENVIRON["NET"] == "" { exit }
+  /^  default:$/ { print "  default: " ENVIRON["NET"]; exit }
+  { gsub(/<проект>/, ENVIRON["NAME"]) }
+  /^[[:space:]]*ANTHROPIC_MODEL:/ {
+    print (ENVIRON["MODEL"] == "" ? $0 : "      " ENVIRON["MODEL"])
+    if (ENVIRON["ALLOW"] != "") print "      " ENVIRON["ALLOW"]
+    next
+  }
+  ENVIRON["WT"] != "" && /^[[:space:]]*- \.\/\.git\// { if (!w++) print ENVIRON["WT"]; next }
+  { print }
+' "$t/$cb" >"$tmp/cb"
+printf '# box-update %s — сумма файла без этой строки и строк CLAUDE_BOX_ALLOW и ANTHROPIC_MODEL\n' "$(cb_sum "$tmp/cb")" >>"$tmp/cb"
 
 # правки проекта в файлах agent-box: сумма разошлась, файл убран или добавлен в папку box-*
 edits=()
@@ -114,13 +179,22 @@ if [ -z "$first" ]; then
     done < <(find "$d" -type f | LC_ALL=C sort)
   done
 fi
+stop=
 if ((${#edits[@]})) && [ -z "$force" ]; then
   say "файлы agent-box правлены в проекте — свежая копия легла бы поверх правки:"
   list "${edits[@]}"
   say "перенеси правку в docs/RULES.md правилом «вместо PROTOCOL.md § <раздел>: …» или «к /box-… шаг <N>: …»"
   say "и запусти box-update --force: свежая копия ляжет поверх, прежний текст останется в истории git"
-  exit 1
+  stop=1
 fi
+if [ -n "$cb_edit" ] && [ -z "$force" ]; then
+  say "claude-box.yml правлен руками — свежий файл лёг бы поверх правки; что изменит box-update:"
+  diff -u --label "$cb сейчас" --label "$cb от box-update" "$cb" "$tmp/cb" | sed 's/^/  /' || true
+  say "строки CLAUDE_BOX_ALLOW и ANTHROPIC_MODEL box-update переносит сам; с другой правкой запусти box-update --force:"
+  say "свежий файл ляжет поверх, прежний останется рядом — claude-box.yml.old"
+  stop=1
+fi
+[ -z "$stop" ] || exit 1
 
 # первый запуск нового проекта: занятые имена заготовок, файлов agent-box и раздела по областям — в .old, .old2…
 renamed=() hidden=()
@@ -140,6 +214,13 @@ if [ -n "$fresh" ]; then
   done
 fi
 
+# прежний claude-box.yml — правленный руками при --force или прежней схемы — рядом в .old
+cb_old=
+if [ -n "$cb_prev$cb_edit" ]; then
+  cb_old=$(oldname "$cb")
+  mv "$cb" "$cb_old"
+fi
+
 # состояние файлов agent-box до копии — для итога
 units=$(printf '%s\n' docs/PROTOCOL.md .claude/context-guard.conf $dirs)
 unit_sum() { [ -e "$1" ] && find "$1" -type f | LC_ALL=C sort | xargs -r -d '\n' sha256sum | sha256sum | cut -c1-64 || true; }
@@ -154,6 +235,12 @@ while IFS= read -r p; do
   rm -f -- "$p"
   cp "$t/$p" "$p"
 done <"$tmp/box.list"
+cb_new=
+if ! cmp -s "$tmp/cb" "$cb"; then
+  [ -e "$cb" ] && cb_new=обновлён || cb_new=собран
+  rm -f -- "$cb"
+  cp "$tmp/cb" "$cb"
+fi
 
 # заготовки — на первом запуске, только недостающие; при разделе по областям основной файл живёт в папке раздела
 laid=()
@@ -170,6 +257,12 @@ fi
 
 # строки: недостающие строки файла образца — в конец, с комментариями над ними в образце; файла нет — копия образца
 declare -A added
+append() {
+  local f=$1
+  shift
+  [ -z "$(tail -c1 "$f")" ] || echo >>"$f"
+  printf '%s\n' "$@" >>"$f"
+}
 add_lines() {
   local f=$1 line com=()
   if [ ! -e "$f" ]; then
@@ -183,8 +276,7 @@ add_lines() {
       '') com=(); continue ;;
     esac
     if ! grep -qxF -- "$line" "$f"; then
-      [ -z "$(tail -c1 "$f")" ] || echo >>"$f"
-      printf '%s\n' "${com[@]}" "$line" >>"$f"
+      append "$f" "${com[@]}" "$line"
       added[$f]+="${added[$f]:+, }$line"
     fi
     com=()
@@ -193,8 +285,12 @@ add_lines() {
 add_lines .gitignore
 add_lines .gitattributes
 if ((${#hidden[@]})); then
-  printf '%s\n' '# сборка документации: бывшее под gitignore' "${hidden[@]}" >>.gitignore
+  append .gitignore '# сборка документации: бывшее под gitignore' "${hidden[@]}"
   added[.gitignore]+="${added[.gitignore]:+, }${hidden[*]}"
+fi
+if [ -n "$cb_old" ] && ! g check-ignore -q "$cb_old"; then
+  append .gitignore '# прежний claude-box.yml — файл машины' "/$cb_old"
+  added[.gitignore]+="${added[.gitignore]:+, }/$cb_old"
 fi
 
 # правила запрета: недостающие правила образца — дописать, правила прежнего образца на правку compose-файлов — убрать
@@ -222,11 +318,27 @@ fi
   xargs -d '\n' sha256sum <"$tmp/box.list"
 } >"$tmp/manifest"
 
+# итог по claude-box.yml — и без коммита: файл вне git
+cb_report() {
+  if [ -n "$cb_new" ]; then
+    say "claude-box.yml $cb_new: проект Compose $name-claude, папка в контейнере /workspace/$name"
+    if [ -n "$cb_net" ]; then list "сеть $(jq -r .name <<<"$cb_net") — из docker compose config проекта"
+    elif [ -n "$compose" ]; then list "без блока сети: у проекта нет сети по умолчанию"
+    else list "без блока сети: у проекта нет compose-файла"
+    fi
+    [ -z "$wt" ] || list "рабочая копия git: подключён .git основного репозитория $gd"
+    [ -z "$env_lines" ] || list "перенесены строки: $(cut -d: -f1 <<<"$env_lines" | paste -sd, - | sed 's/,/, /g')"
+    [ -z "$cb_old" ] || list "прежний файл — $cb_old: свои строки сверь с новым"
+  fi
+  [ -z "$cb_svc" ] || say "сервис claude остался в compose-файле проекта — убери его строки: контейнер Claude теперь из claude-box.yml"
+}
+
 # правки обновления — без таск-файлов пользователя и манифеста; правок нет и манифест есть — коммита нет
 ex=()
 for p in "${keep[@]}"; do ex+=(":(exclude,literal)$p"); done
 if [ -z "$first" ] && [ -z "$(g status --porcelain -uall -- . "${ex[@]}" ":(exclude,literal)$manifest")" ]; then
   say "обвязка свежая — agent-box ${rev:0:7}, правок нет, коммита нет"
+  cb_report
   exit 0
 fi
 cp "$tmp/manifest" "$manifest"
@@ -247,6 +359,7 @@ done
 ((${#upd[@]} == 0)) || { say "файлы agent-box обновлены:"; list "${upd[@]}"; }
 ((${#gone[@]} == 0)) || { say "файлы agent-box убраны — их нет в новой версии:"; list "${gone[@]}"; }
 ((${#laid[@]} == 0)) || { say "заготовки легли:"; list "${laid[@]}"; }
+cb_report
 for f in .gitignore .gitattributes; do
   [ -z "${added[$f]:-}" ] || say "$f: ${added[$f]}"
 done
