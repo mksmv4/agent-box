@@ -6,6 +6,8 @@
 # Файл agent-box, правленный в проекте, останавливает обновление без правок; --force кладёт свежую копию поверх правки.
 # claude-box.yml — сервис claude этой машины, вне git: собирается из образца и docker compose config проекта, его сумма — последней строкой файла;
 # правка руками, кроме строк CLAUDE_BOX_ALLOW и ANTHROPIC_MODEL, останавливает обновление, --force кладёт свежий файл, прежний — в claude-box.yml.old.
+# Строки хаба, docs/RULES.md и docs/rules/ со ссылкой на раздел протокола или скилл box-* — правила проекта поверх agent-box: итог их называет,
+# раздел или скилл, пропавший в новой версии, останавливает обновление. Итог с коммитом — записи журнала agent-box о правках template/ с прошлой версии.
 # Код выхода: 0 — обновлено или нечего обновлять; 1 — остановка без правок; 2 — неверный запуск или нет нужной команды.
 set -euo pipefail
 
@@ -86,6 +88,8 @@ t=$tmp/template
 # прежний манифест: строка коммита и суммы файлов
 : >"$tmp/old.sums"
 [ -z "$first" ] && grep -v '^#' "$manifest" >"$tmp/old.sums" || true
+old_rev=
+[ -n "$first" ] || old_rev=$(sed -n '1s/^# agent-box \([0-9a-f]\{7,40\}\)$/\1/p' "$manifest")
 # папки box-* прежней версии и образца — целиком принадлежат обвязке
 dirs=$( { cut -d' ' -f3 "$tmp/old.sums"; cat "$tmp/box.list"; } | grep '^\.claude/skills/box-' | cut -d/ -f1-3 | LC_ALL=C sort -u)
 
@@ -98,6 +102,53 @@ for p in $(cat "$tmp/box.list") $(cut -d' ' -f3 "$tmp/old.sums") $dirs .gitignor
     *) say "путь ведёт ссылкой за папку проекта: $p — убери ссылку и запусти box-update снова"; exit 1 ;;
   esac
 done
+
+# правила проекта поверх agent-box — строки хаба, docs/RULES.md и docs/rules/ со ссылкой на раздел протокола или скилл box-*;
+# раздел или скилл, которого в новой версии нет, — остановка: правило проекта перестало бы действовать молча.
+# Раздел — самый длинный заголовок прежнего или нового протокола в начале текста после «§»: так переименование
+# «Сообщения пользователю» в «Сообщения» видно как пропажа. У нового проекта хаб и правила уходят в .old — проверки нет.
+heads() { awk '/^```/ { f = !f; next } !f && /^#+[ \t]/ { sub(/^#+[ \t]+/, ""); sub(/[ \t]+$/, ""); print }' "$1"; }
+heads "$t/docs/PROTOCOL.md" >"$tmp/heads.new"
+{ cat "$tmp/heads.new"; [ ! -f docs/PROTOCOL.md ] || heads docs/PROTOCOL.md; } >"$tmp/heads.all"
+section() {
+  local h best=
+  while IFS= read -r h; do
+    case $1 in "$h" | "$h"[![:alnum:]_-]*) ((${#h} > ${#best})) && best=$h ;; esac
+  done <"$tmp/heads.all"
+  printf '%s' "$best"
+}
+re_sec='PROTOCOL\.md`?[[:space:]]*§[[:space:]]*(.*)'
+re_box='(^|[^[:alnum:]_./-])/(box-[a-z0-9-]+)(.*)'
+rules=() rgone=() rfiles=()
+if [ -z "$fresh" ]; then
+  for f in CLAUDE.md AGENTS.md docs/RULES.md; do [ -f "$f" ] && rfiles+=("$f"); done
+  [ -d docs/rules ] && while IFS= read -r -d '' f; do rfiles+=("$f"); done < <(find docs/rules -type f -print0 | LC_ALL=C sort -z)
+fi
+if ((${#rfiles[@]})); then
+  while IFS= read -r m; do
+    f=${m%%:*}
+    m=${m#*:}
+    n=${m%%:*}
+    text=${m#*:}
+    live=() dead=()
+    rest=$text
+    while [[ $rest =~ $re_sec ]]; do
+      rest=${BASH_REMATCH[1]}
+      s=$(section "$rest")
+      if [ -n "$s" ] && grep -qxF -- "$s" "$tmp/heads.new"; then live+=("PROTOCOL.md § $s")
+      else dead+=("PROTOCOL.md § ${s:-$(sed 's/[,:;].*//' <<<"${rest:0:60}")}")
+      fi
+    done
+    rest=$text
+    while [[ $rest =~ $re_box ]]; do
+      s=${BASH_REMATCH[2]}
+      rest=${BASH_REMATCH[3]}
+      if [ -d "$t/.claude/skills/$s" ]; then live+=("/$s"); else dead+=("/$s"); fi
+    done
+    if ((${#live[@]})); then j=$(printf '%s, ' "${live[@]}"); rules+=("$f:$n — ${j%, }"); fi
+    if ((${#dead[@]})); then j=$(printf '%s, ' "${dead[@]}"); rgone+=("$f:$n — ${j%, }"); fi
+  done < <(grep -HnE 'PROTOCOL\.md`?[[:space:]]*§|/box-[a-z0-9]' -- "${rfiles[@]}" || true)
+fi
 
 # claude-box.yml — образец с именем проекта Compose, путём /workspace/<проект>, сетью по умолчанию проекта
 # и подключениями основного репозитория у дополнительной рабочей копии git; файл машины, поэтому сумма — в нём самом
@@ -192,6 +243,14 @@ if [ -n "$cb_edit" ] && [ -z "$force" ]; then
   diff -u --label "$cb сейчас" --label "$cb от box-update" "$cb" "$tmp/cb" | sed 's/^/  /' || true
   say "строки CLAUDE_BOX_ALLOW и ANTHROPIC_MODEL box-update переносит сам; с другой правкой запусти box-update --force:"
   say "свежий файл ляжет поверх, прежний останется рядом — claude-box.yml.old"
+  stop=1
+fi
+if ((${#rgone[@]})); then
+  say "правила проекта называют разделы протокола или скиллы, которых в новой версии agent-box нет, — после обновления правила перестали бы действовать:"
+  list "${rgone[@]}"
+  say "разделы нового протокола: $(paste -sd '|' "$tmp/heads.new" | sed 's/|/; /g')"
+  say "скиллы: $(cd "$t/.claude/skills" && printf '/%s ' box-*)"
+  say "поправь правила под новую версию, закоммить и запусти box-update снова"
   stop=1
 fi
 [ -z "$stop" ] || exit 1
@@ -333,12 +392,38 @@ cb_report() {
   [ -z "$cb_svc" ] || say "сервис claude остался в compose-файле проекта — убери его строки: контейнер Claude теперь из claude-box.yml"
 }
 
+rules_report() {
+  ((${#rules[@]} == 0)) || { say "правила проекта поверх agent-box — при споре главнее протокола и скиллов:"; list "${rules[@]}"; }
+}
+
+# что изменилось — записи журнала agent-box, чьи коммиты меняли template/ между версией манифеста и новой;
+# коммиты без записи — строкой сообщения: запись журнала ложится, когда задача agent-box готова
+changes_report() {
+  [ -n "$old_rev" ] && [ "$old_rev" != "$rev" ] || return 0
+  if ! git -C "$clone" cat-file -e "$old_rev^{commit}" 2>/dev/null; then
+    say "коммита прежней версии ${old_rev:0:7} в клоне agent-box нет — что изменилось, не собрать"
+    return 0
+  fi
+  git -C "$clone" rev-list "$old_rev..$rev" -- template >"$tmp/commits"
+  [ -s "$tmp/commits" ] || return 0
+  # строки журнала, кроме записей, — пустые: номера строк остаются
+  { git -C "$clone" show "$rev:docs/JOURNAL.md" 2>/dev/null || true; } | sed '/^- \*\*/!s/.*//' >"$tmp/journal"
+  grep -noE '`[0-9a-f]{7,40}`' "$tmp/journal" | sed 's/^\([0-9]*\):`\([0-9a-f]\{7\}\).*/\1 \2/' >"$tmp/jhash" || true
+  awk 'FILENAME == ARGV[1] { c[substr($1, 1, 7)]; next } FILENAME == ARGV[2] { if ($2 in c) l[$1]; next }
+    FNR in l { print "    " $0 }' "$tmp/commits" "$tmp/jhash" "$tmp/journal" >"$tmp/entries"
+  awk 'FILENAME == ARGV[1] { j[$2]; next } !(substr($1, 1, 7) in j)' "$tmp/jhash" "$tmp/commits" >"$tmp/bare"
+  say "что изменилось в agent-box с ${old_rev:0:7}:"
+  [ ! -s "$tmp/entries" ] || { list "записи журнала agent-box:"; cat "$tmp/entries"; }
+  [ ! -s "$tmp/bare" ] || { list "коммиты без записи журнала:"; xargs git -C "$clone" log --no-walk=unsorted --format='    %h %s' <"$tmp/bare"; }
+}
+
 # правки обновления — без таск-файлов пользователя и манифеста; правок нет и манифест есть — коммита нет
 ex=()
 for p in "${keep[@]}"; do ex+=(":(exclude,literal)$p"); done
 if [ -z "$first" ] && [ -z "$(g status --porcelain -uall -- . "${ex[@]}" ":(exclude,literal)$manifest")" ]; then
   say "обвязка свежая — agent-box ${rev:0:7}, правок нет, коммита нет"
   cb_report
+  rules_report
   exit 0
 fi
 cp "$tmp/manifest" "$manifest"
@@ -367,6 +452,8 @@ done
 [ -z "$rules_out" ] || say ".claude/settings.json, правила прежнего образца убраны: $rules_out"
 ign=$({ cat "$tmp/box.list"; printf '%s\n' "${laid[@]}" "$manifest"; } | g check-ignore --stdin || true)
 [ -z "$ign" ] || { say "под .gitignore проекта — в git не попадут:"; list $ign; }
+rules_report
+changes_report
 
 g add -A -- . "${ex[@]}"
 g commit -q -m "chore(box): agent-box ${rev:0:7}"
