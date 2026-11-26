@@ -181,7 +181,7 @@ if [ -n "$compose" ]; then
       | select((.key == "CLAUDE_BOX_ALLOW" or .key == "ANTHROPIC_MODEL") and .value != null) | "\(.key): \(.value | @json)"' "$tmp/compose.json")
   fi
 else
-  # без compose-файла — имя папки, приведённое, как в box-connect: путь в контейнере у обоих запусков один
+  # без compose-файла — имя папки, приведённое к имени проекта Compose: нижний регистр, только a-z0-9_-, без ведущих - и _
   name=$(basename "$PWD" | tr A-Z a-z | tr -cd 'a-z0-9_-' | sed 's/^[-_]*//')
 fi
 # прежний файл: строки адресов и модели переносятся как есть; без строки суммы — файл прежней схемы, остаётся рядом в .old

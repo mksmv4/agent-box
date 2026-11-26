@@ -2,7 +2,7 @@
 # Движок автоцикла: итерации /box-next по задаче проекта, пока статус таск-файла «в работе» или «блокер» с ответом пользователя.
 # Запуск на хосте из папки проекта: agent-loop.sh [--host | --no-firewall] [--api] [--quiet] [--resume <id>] <задача>; из любой папки — путём к таск-файлу: agent-loop.sh [--host | --no-firewall] [--api] [--quiet] [--resume <id>] <проект>/docs/tasks/<задача>.md
 # --resume <id> — первая итерация запуска продолжает сессию, оборванную сбоем сети, API или лимитом подписки; дальше цикл идёт свежими сессиями.
-# Первый раз на машине — ./agent-loop.sh в папке клона: скрипт ставит себя и box-connect командами ссылками в ~/.local/bin.
+# Первый раз на машине — ./agent-loop.sh в папке клона: скрипт ставит себя, box-connect и box-update командами ссылками в ~/.local/bin.
 # Итерации идут в контейнере — сервисе claude из claude-box.yml проекта: сеть ограничена списком адресов, режим без вопросов о разрешениях;
 # --no-firewall — сеть контейнера открыта, режим auto; --host — итерации claude хоста в режиме auto.
 # --api — итерации на API-ключе из строки ANTHROPIC_API_KEY в ~/.config/agent-loop.env: расход идёт с API-кредитов организации Console; строки нет — отказ запуска.
@@ -105,16 +105,17 @@ sandbox_rule() {
   exit 0
 }
 
-# команды agent-loop.sh и box-connect по имени: ссылки на скрипты клона в ~/.local/bin; папки нет в PATH — запуск полным адресом.
+# команды agent-loop.sh, box-connect и box-update по имени: ссылки на скрипты клона в ~/.local/bin; папки нет в PATH — запуск полным адресом.
 # Ссылки от перенесённого клона заменяются. me — команда запуска в подсказках движка; self — сам скрипт в клоне, рядом с ним конфиг
 me=agent-loop.sh
 self=$(realpath "$0")
-if ! command -v agent-loop.sh >/dev/null || ! command -v box-connect >/dev/null; then
+if ! command -v agent-loop.sh >/dev/null || ! command -v box-connect >/dev/null || ! command -v box-update >/dev/null; then
   case ":$PATH:" in
     *":$HOME/.local/bin:"*)
       mkdir -p ~/.local/bin && ln -sf "$self" ~/.local/bin/agent-loop.sh &&
         ln -sf "$(dirname "$self")"/box-connect ~/.local/bin/box-connect &&
-        say "agent-loop.sh и box-connect теперь запускаются по имени из любой папки" ;;
+        ln -sf "$(dirname "$self")"/box-update ~/.local/bin/box-update &&
+        say "agent-loop.sh, box-connect и box-update теперь запускаются по имени из любой папки" ;;
     *)
       me=$self
       say "папки ~/.local/bin нет в PATH — запуск полным адресом" ;;
@@ -215,7 +216,7 @@ say "пределы цикла${own:+ из $conf: $own}${own:+${def:+;}}${def:+ 
 
 # сервис claude — в claude-box.yml проекта явным -f: контейнер собирается только по нему, основной compose-файл проекта, дополнения и COMPOSE_FILE из .env в сборку не входят
 cf=claude-box.yml
-[ -n "$host" ] || [ -f "$cf" ] || stop 2 "нет $cf в корне проекта — его кладёт /box-init; итерации на хосте — $me --host $target"
+[ -n "$host" ] || [ -f "$cf" ] || stop 2 "нет $cf в корне проекта — его собирает box-update в папке проекта; итерации на хосте — $me --host $target"
 
 # режим итераций: в контейнере без --no-firewall — точка входа claude-box-firewall ограничивает сеть, и вопросов о разрешениях нет
 mode=auto
@@ -395,7 +396,7 @@ $(sed -n '/^## Блокер/,$p' "$file")"
   elif [ -z "$host" ]; then
     # сервис claude проекта — перед первой итерацией в контейнере
     services=$(docker compose -f "$cf" --profile claude config --services 2>&1)
-    grep -qx claude <<<"$services" || stop 2 "нет сервиса claude в $cf — его кладёт /box-init; итерации на хосте — $me --host $target
+    grep -qx claude <<<"$services" || stop 2 "нет сервиса claude в $cf — его собирает box-update в папке проекта; итерации на хосте — $me --host $target
 $services"
   fi
 
@@ -436,9 +437,9 @@ $services"
   # начало сессии: свежая на шаг очереди или продолжение оборванной — с тем же id и файлом истории
   start=(-p "/box-next $task" --session-id "$sid")
   [ -z "$resume_id" ] || start=(-p "Сессию оборвал технический сбой: сеть, API или лимит подписки. Продолжи шаг с места обрыва и заверши сессию по docs/PROTOCOL.md." --resume "$sid")
-  # строка системного промпта итерации: человека рядом нет — вопрос и отклонённая команда идут блокером
+  # строка системного промпта итерации — правило итерации без человека целиком: вопрос, просьба руками и отклонённая команда идут блокером
   args=("${start[@]}" --permission-mode "$mode" --permission-prompts none
-    --append-system-prompt "Эта сессия — итерация движка agent-loop.sh: человека рядом нет, последнее сообщение сессии никто не читает. Вопрос пользователю, просьба сделать руками и команда, отклонённая проверкой разрешений, — секцией «Блокер» таск-файла со статусом «блокер» по docs/PROTOCOL.md § Таск-файлы."
+    --append-system-prompt "Эта сессия — итерация движка agent-loop.sh: человека рядом нет, последнее сообщение сессии никто не читает, а статус «в работе» движок запускает на тот же шаг новой сессией. Поэтому вопрос пользователю, просьба сделать руками и команда, отклонённая проверкой разрешений Claude Code, — секцией «Блокер» таск-файла со статусом «блокер» по docs/PROTOCOL.md § Таск-файлы; отклонённая команда идёт в секцию просьбой сделать руками, готовой строкой."
     --output-format json --max-turns "$max_turns")
   # окружение итерации: сигнал context-guard — протокол молча; кэш промпта на пять минут вместо часового по умолчанию подписки — отсчёт идёт
   # от последнего вызова, вызовы внутри итерации идут чаще, а следующая итерация стартует новой сессией; запись в кэш на час стоит 2× входа, на пять минут — 1,25×.

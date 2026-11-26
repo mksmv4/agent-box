@@ -1,16 +1,11 @@
 #!/usr/bin/env bash
-# Первый запуск Claude в контейнере в папке проекта, где claude-box.yml ещё нет, — до /box-init.
+# Claude в контейнере проекта — сервис claude из claude-box.yml в папке проекта, тот же, что у итераций движка.
 # Запуск на хосте из папки проекта: box-connect; команду ставит ./agent-loop.sh в папке клона ссылкой в ~/.local/bin.
-# Имя папки приводится к имени проекта Compose: путь в контейнере — тот же, что у запусков через claude-box.yml,
-# и сессии, автопамять и доверие Claude Code у проекта общие.
-# Рабочая копия git (.git — файл): .git основного репозитория — по тому же пути, его настройки, хуки и список исключений — только на чтение.
-set -euo pipefail
+# claude-box.yml собирает box-update в папке проекта: нет файла — подсказка и код 1.
+set -eu
 
-n=$(basename "$PWD" | tr A-Z a-z | tr -cd 'a-z0-9_-' | sed 's/^[-_]*//')
-wt=()
-if [ -f .git ]; then
-  g=$(git rev-parse --path-format=absolute --git-common-dir)
-  wt=(-v "$g":"$g" -v "$g"/config:"$g"/config:ro -v "$g"/hooks:"$g"/hooks:ro -v "$g"/info:"$g"/info:ro)
-fi
-exec docker run --rm -it -v "$PWD":/workspace/"$n" -w /workspace/"$n" "${wt[@]}" \
-  -v "$HOME"/.claude-box:/home/node -v "$HOME":/root/host-home:ro maksim44/claude-box
+[ -f claude-box.yml ] || {
+  echo "box-connect: в этой папке нет claude-box.yml — его собирает box-update: запусти box-update в папке проекта, потом снова box-connect" >&2
+  exit 1
+}
+exec docker compose -f claude-box.yml run --rm claude
