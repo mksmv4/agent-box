@@ -1,4 +1,4 @@
-# Образ claude-box: Claude Code в терминале контейнера, образец проекта и скиллы обвязки.
+# Образ claude-box: Claude Code в терминале контейнера — скрипт запуска, ограничение сети и чтение .env проекта; образец проекта и скиллы обвязки кладёт в проект box-update.
 # Сам Claude Code ставится при первом старте в volume домашней папки.
 # Сборка — из корня репозитория agent-box: docker compose build claude
 FROM node:20
@@ -12,9 +12,6 @@ COPY container/settings.json /etc/claude-box/settings.json
 COPY container/entrypoint.sh /usr/local/bin/claude-box
 COPY container/env-run.py /usr/local/bin/claude-box-env
 COPY container/firewall.sh /usr/local/bin/claude-box-firewall
-# образец проекта для /box-init; скиллы скрипт запуска кладёт в ~/.claude/skills
-COPY template/ /etc/claude-box/template/
-COPY skills/ /etc/claude-box/skills/
 
 ENV PATH=/home/node/.local/bin:$PATH
 WORKDIR /workspace
