@@ -1,6 +1,7 @@
 # Claude Code в контейнере, файл этой машины под .gitignore проекта: docker compose -f claude-box.yml run --rm claude [флаги claude]
 # Файл собирает box-update в папке проекта из этого образца: <проект> ниже — имя проекта Compose из docker compose config проекта — основной compose-файл, дополнение compose.override.yml или список COMPOSE_FILE в .env, — у проекта без compose-файла — имя папки.
-# Правка руками, кроме строк CLAUDE_BOX_ALLOW и ANTHROPIC_MODEL, останавливает box-update: последняя строка файла — его сумма без этих строк.
+# Строки CLAUDE_BOX_ALLOW, ANTHROPIC_MODEL и свои строки, дописанные сверх образца, box-update переносит в свежий файл, правка остальных строк его останавливает:
+# последняя строка файла — сумма строк образца и коммит agent-box, из которого они собраны.
 # Своё имя проекта Compose — <проект>-claude: запуск Claude сверяет с этим файлом только ресурсы проекта Claude, контейнеры и сети основного compose-файла остаются как есть,
 # и --remove-orphans в запуске Claude базу проекта оставляет.
 # Строка COMPOSE_PROJECT_NAME в .env проекта сильнее строки name: и возвращает Claude в проект основного файла: имя проекта — в строке name: основного файла.
