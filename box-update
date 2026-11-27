@@ -194,12 +194,12 @@ if [ -e "$cb" ]; then
   frev=$(sed -n 's/^# box-update [0-9a-f]\{64\} \([0-9a-f]\{40\}\) .*/\1/p' "$cb" | tail -1)
   [ -n "$rec" ] || cb_prev=1
 fi
-gd= wt=
-if [ -f .git ]; then
-  gd=$(g rev-parse --path-format=absolute --git-common-dir)
-  wt=$(printf '      - %s\n' "$gd:$gd" "$gd/config:$gd/config:ro" "$gd/hooks:$gd/hooks:ro" "$gd/info:$gd/info:ro")
-fi
-# сборка из файла образца $1 со значениями проекта и строками адресов и модели прежнего файла
+# подключения .git основного репозитория $1 у дополнительной рабочей копии git
+wt_lines() { [ -z "$1" ] || printf '      - %s\n' "$1:$1" "$1/config:$1/config:ro" "$1/hooks:$1/hooks:ro" "$1/info:$1/info:ro"; }
+gd=
+[ ! -f .git ] || gd=$(g rev-parse --path-format=absolute --git-common-dir)
+wt=$(wt_lines "$gd")
+# сборка из файла образца $1 со значениями name, cb_net, wt и строками адресов и модели прежнего файла
 cb_render() {
   NAME=$name NET=$cb_net WT=$wt \
     MODEL=$(grep -m1 '^ANTHROPIC_MODEL:' <<<"$env_lines" || true) ALLOW=$(grep -m1 '^CLAUDE_BOX_ALLOW:' <<<"$env_lines" || true) awk '
@@ -218,20 +218,24 @@ cb_render() {
 cb_render "$t/$cb" >"$tmp/cb"
 cb_new_sum=$(cb_sum "$tmp/cb")
 
-# свои строки — строки прежнего файла сверх строк образца, собранных заново из образца коммита строки суммы;
-# сверка построчная (diff): метка = — общая строка, - — только у образца, + — только в файле.
-# Строка образца правлена или убрана, кроме строк адресов и модели, — cb_edit; образец не собрать с той же суммой
-# (сменились имя проекта, сеть или путь .git, коммита нет в клоне) — cb_edit и cb_unk: свои строки не отделить.
-# Свои строки ложатся в свежий файл за той же строкой образца; она изменилась или убрана в новой версии — строки в cb.lost
+# свои строки — строки прежнего файла сверх строк образца, собранных заново из образца коммита строки суммы
+# со значениями самого файла: имя проекта, блок сети, .git основного репозитория; сверка построчная (diff):
+# метка = — общая строка, - — только у образца, + — только в файле. Строка образца правлена или убрана, кроме строк
+# адресов и модели, — cb_edit; строки образца с той же суммой не собрать (правлены строки значений, коммита нет в клоне) —
+# тоже cb_edit, свои строки не отделить. Свои строки ложатся в свежий файл за той же строкой образца: сопоставление
+# строк — между образцом прежнего коммита и новым при нынешних значениях проекта; строка, за которой они стоят,
+# изменилась или убрана в новой версии — строки в cb.lost
 tags() { diff --unchanged-line-format='=%L' --old-line-format='-%L' --new-line-format='+%L' "$1" "$2" || true; }
-cb_edit= cb_unk=
+val() { sed -n "s|$1|\\1|;T;p;q" "$tmp/cb.cur"; }
+cb_edit=
 : >"$tmp/cb.own"
 : >"$tmp/cb.lost"
 if [ -n "$rec" ]; then
   grep -v '^# box-update ' "$cb" >"$tmp/cb.cur" || true
   if [ "$(cb_sum "$tmp/cb.cur")" != "$rec" ]; then
     { [ -n "$frev" ] && git -C "$clone" show "$frev:template/$cb" 2>/dev/null || cat "$t/$cb"; } >"$tmp/cb.tpl"
-    cb_render "$tmp/cb.tpl" >"$tmp/cb.base"
+    name=$(val '^name: \(.*\)-claude$') cb_net=$(val '^  default: \(.*\)$') \
+      wt=$(wt_lines "$(val '^      - \(/.*\)/config:\1/config:ro$')") cb_render "$tmp/cb.tpl" >"$tmp/cb.base"
     if [ "$(cb_sum "$tmp/cb.base")" = "$rec" ]; then
       # свои строки: номер строки образца, за которой стоят, и строка; строки, заменившие строку образца, — правка, не свои
       tags "$tmp/cb.base" "$tmp/cb.cur" | awk -v key="$cbkeys" '
@@ -243,8 +247,9 @@ if [ -n "$rec" ]; then
         line !~ key { buf[++n] = line }
         END { flush(); exit edit }
       ' >"$tmp/cb.own" || cb_edit=1
-      # свежий файл: свои строки — за той же строкой образца
-      tags "$tmp/cb.base" "$tmp/cb" | awk -v lost="$tmp/cb.lost" '
+      # свежий файл: свои строки — за той же строкой образца; прежний образец с нынешними значениями — строка в строку с cb.base
+      cb_render "$tmp/cb.tpl" >"$tmp/cb.base2"
+      tags "$tmp/cb.base2" "$tmp/cb" | awk -v lost="$tmp/cb.lost" '
         FILENAME == ARGV[1] { t = index($0, "\t"); a = substr($0, 1, t - 1); own[a] = own[a] substr($0, t + 1) "\n"; next }
         FNR == 1 && ("0" in own) { printf "%s", own["0"]; delete own["0"] }
         { tag = substr($0, 1, 1); line = substr($0, 2) }
@@ -255,7 +260,7 @@ if [ -n "$rec" ]; then
       ' "$tmp/cb.own" - >"$tmp/cb.new"
       mv "$tmp/cb.new" "$tmp/cb"
     else
-      cb_edit=1 cb_unk=1
+      cb_edit=1
     fi
   fi
 fi
@@ -292,10 +297,7 @@ if ((${#edits[@]})) && [ -z "$force" ]; then
   stop=1
 fi
 if [ -n "$cb_stop" ] && [ -z "$force" ]; then
-  if [ -n "$cb_unk" ]; then
-    say "claude-box.yml правлен руками, а свои строки от строк образца не отделить: правлены строки образца —"
-    say "или в файле свои строки, а у проекта сменились имя проекта Compose, сеть или путь .git; что изменит box-update:"
-  elif [ -n "$cb_edit" ]; then
+  if [ -n "$cb_edit" ]; then
     say "claude-box.yml: строки образца правлены руками — свежий файл лёг бы поверх правки; что изменит box-update:"
   else
     say "claude-box.yml: строки образца, за которыми стоят твои строки, в новой версии agent-box изменены или убраны —"
@@ -448,7 +450,7 @@ cb_report() {
     fi
     [ -z "$wt" ] || list "рабочая копия git: подключён .git основного репозитория $gd"
     [ -z "$env_lines" ] || list "перенесены строки: $(cut -d: -f1 <<<"$env_lines" | paste -sd, - | sed 's/,/, /g')"
-    [ -z "$cb_carried" ] || { list "перенесены свои строки сверх образца:"; sed 's/^[[:space:]]*/    /' <<<"$cb_carried"; }
+    [ -z "$cb_carried" ] || { list "перенесены свои строки сверх образца:"; sed 's/^/    /' <<<"$cb_carried"; }
     [ -z "$cb_old" ] || list "прежний файл — $cb_old: свои строки сверь с новым"
   fi
   [ -z "$cb_svc" ] || say "сервис claude остался в compose-файле проекта — убери его строки: контейнер Claude теперь из claude-box.yml"
