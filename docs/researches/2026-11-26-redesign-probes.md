@@ -206,3 +206,18 @@ CLI 2.1.332. Скрипты — `my_local/redesign/task/setup.sh` и `run.sh`; �
 | смена сети проекта при своих строках: `MY_VAR` и `x-mine: 1` за строкой сети, в `compose.yml` дописан блок сети `cbt_other` | без остановки; сеть — `cbt_other`, как у проекта; `MY_VAR` в окружении, `x-mine` — за новой строкой сети | так, код 0 |
 
 Первая версия скрипта, коммит `36d3e33`, собирала строки образца прежнего файла с нынешними значениями проекта: в прогоне `run-CBgb` смена сети при своих строках остановила обновление — строки образца с той же суммой не собрались. Коммит `4c3b5b6` берёт значения из самого файла, а строки прежнего и нового образца сопоставляет при нынешних значениях.
+
+## Проба образа и `/box-init`, 2026-11-27
+
+**Что запускали.** Образ из коммита `06d12d6` под пробным тегом `claude-box:redesign-probe`: `docker build -f container/Dockerfile` из корня клона; в `/etc/claude-box/` образа — только `settings.json`. Два тестовых проекта в `my_local/redesign/init/`, оба — папка с `package.json`, `.npmrc` на реестр GitHub и заметкой `notes.md` об оплате через Stripe, разложены `box-update` того же коммита: `rdi-proj` — как есть, `rdi-noman` — манифест `.claude/agent-box.sha256` убран коммитом. В `claude-box.yml` обоих — образ пробы и своя папка пробы `home-skills` поверх `~/.claude/skills` контейнера: в ней копии прежнего образа `box-init`, `box-update` и скилл пользователя `my-skill`. Сессии — `claude -p /box-init --permission-mode bypassPermissions --permission-prompts none` через точку входа ограничения сети, как у итераций движка. Скрипты — `my_local/redesign/init/setup.sh` и `run.sh`; итоги, вывод `box-update` и истории сессий — там же.
+
+**Что ждали.** `box-update` кладёт `/box-init` вместе с остальными скиллами `box-*`; после старта контейнера в `~/.claude/skills` нет `box-*`, `my-skill` на месте; `/box-init` приходит из проекта; без манифеста он называет `box-update` и заканчивает без правок, с манифестом идёт к адресам проекта и задаче сборки.
+
+**Что вышло.** Проба прошла.
+
+| Проект | `~/.claude/skills` после старта | Загружен | Итог сессии |
+|---|---|---|---|
+| `rdi-noman`, без манифеста | `my-skill`, `synced` | `/workspace/rdi-noman/.claude/skills/box-init` | 2 хода: «проект не подключён к agent-box», первый шаг — `box-update` в терминале компьютера в папке проекта, дальше `box-connect` и `/box-init`; коммитов и правок нет |
+| `rdi-proj`, с манифестом | `my-skill`, `synced` | `/workspace/rdi-proj/.claude/skills/box-init` | 11 ходов: дерево чистое, список адресов на правку — `api.stripe.com`, `docs.stripe.com`, `lodash.com` с причинами — и вопрос «ок или правки»; коммитов и правок до ответа нет |
+
+`box-update` в `rdi-proj` назвал `.claude/skills/box-init` среди файлов agent-box, легших впервые. Сессии стоили 0,29 и 0,62 доллара; сети Docker проб убраны `docker compose down`, контейнеров не осталось.
