@@ -6,7 +6,8 @@
 # Файл agent-box, правленный в проекте, останавливает обновление без правок; --force кладёт свежую копию поверх правки.
 # claude-box.yml — сервис claude этой машины, вне git: собирается из образца и docker compose config проекта, сумма строк образца и коммит — последней строкой файла;
 # строки CLAUDE_BOX_ALLOW, ANTHROPIC_MODEL и свои строки сверх образца переносятся в свежий файл, правка строк образца останавливает обновление,
-# --force кладёт свежий файл, прежний — в claude-box.yml.old.
+# --force кладёт свежий файл, прежний — в claude-box.yml.old. Значения адресов и модели — разбором YAML (docker compose config), в свежем файле — одной строкой;
+# прежний или собранный файл, который Compose не разбирает, останавливает обновление.
 # Строки хаба, docs/RULES.md и docs/rules/ со ссылкой на раздел протокола или скилл box-* — правила проекта поверх agent-box: итог их называет,
 # раздел или скилл, пропавший в новой версии, останавливает обновление. Итог с коммитом — записи журнала agent-box о правках template/ с прошлой версии.
 # Код выхода: 0 — обновлено или нечего обновлять; 1 — остановка без правок; 2 — неверный запуск или нет нужной команды.
@@ -155,7 +156,25 @@ fi
 # и подключениями основного репозитория у дополнительной рабочей копии git; файл машины, поэтому сумма — в нём самом
 cb=claude-box.yml
 cbkeys='^[[:space:]]*(CLAUDE_BOX_ALLOW|ANTHROPIC_MODEL):'
-cb_sum() { grep -vE "^# box-update |$cbkeys" "$1" | sha256sum | cut -c1-64; }
+# строки значения адресов или модели, продолженного на следующих строках глубже ключа отступом, — прочь: построчная сверка видит одну строку ключа
+cb_fold() {
+  awk -v key="$cbkeys" '
+    { match($0, /^ */); ind = RLENGTH }
+    v && ind > kind && /[^ ]/ { next }
+    { v = 0 }
+    $0 ~ key { v = 1; kind = ind }
+    { print }
+  ' "$1"
+}
+cb_sum() { cb_fold "$1" | grep -vE "^# box-update |$cbkeys" | sha256sum | cut -c1-64; }
+# строки адресов и модели из вывода docker compose config: значение одной строкой — пробелы и переводы строк подряд — один пробел;
+# слово из букв, цифр, точек, дефисов — без кавычек, как в образце: повторный запуск файл не меняет
+env_of() {
+  jq -r '.services.claude.environment // {} | to_entries[]
+    | select((.key == "CLAUDE_BOX_ALLOW" or .key == "ANTHROPIC_MODEL") and .value != null)
+    | "\(.key): \(.value | gsub("\\s+"; " ") | sub("^ "; "") | sub(" $"; "")
+      | if test("^[A-Za-z][A-Za-z0-9._-]*$") then . else @json end)"' "$1"
+}
 envkey() { [ -f .env ] && grep -Eq "^[[:space:]]*(export[[:space:]]+)?$1[[:space:]]*=" .env; }
 compose=
 for f in compose.yaml compose.yml docker-compose.yml docker-compose.yaml; do [ -f "$f" ] && compose=1; done
@@ -178,18 +197,23 @@ if [ -n "$compose" ]; then
   # сервис claude прежней схемы в compose-файле проекта: его строки адресов и модели — в claude-box.yml, сам сервис убирает человек
   if jq -e '.services.claude' "$tmp/compose.json" >/dev/null; then
     cb_svc=1
-    env_lines=$(jq -r '.services.claude.environment // {} | to_entries[]
-      | select((.key == "CLAUDE_BOX_ALLOW" or .key == "ANTHROPIC_MODEL") and .value != null) | "\(.key): \(.value | @json)"' "$tmp/compose.json")
+    env_lines=$(env_of "$tmp/compose.json")
   fi
 else
   # без compose-файла — имя папки, приведённое к имени проекта Compose: нижний регистр, только a-z0-9_-, без ведущих - и _
   name=$(basename "$PWD" | tr A-Z a-z | tr -cd 'a-z0-9_-' | sed 's/^[-_]*//')
 fi
-# прежний файл: строки адресов и модели переносятся как есть; без строки суммы — файл прежней схемы, остаётся рядом в .old;
+# прежний файл: значения адресов и модели — разбором файла, как у compose-файла проекта; без строки суммы — файл прежней схемы, остаётся рядом в .old;
 # в строке суммы — коммит клона, из образца которого собраны строки образца файла
 cb_prev= rec= frev=
 if [ -e "$cb" ]; then
-  env_lines=$(grep -E "$cbkeys" "$cb" | sed 's/^[[:space:]]*//' || true)
+  if ! docker compose -f "$cb" --profile '*' config --format json --no-env-resolution >"$tmp/cb.json" 2>"$tmp/compose.err"; then
+    say "$cb не разбирается docker compose config — строки адресов и модели взять неоткуда:"
+    sed 's/^/  /' "$tmp/compose.err"
+    say "почини файл и запусти box-update снова"
+    exit 1
+  fi
+  env_lines=$(env_of "$tmp/cb.json")
   rec=$(sed -n 's/^# box-update \([0-9a-f]\{64\}\) .*/\1/p' "$cb" | tail -1)
   frev=$(sed -n 's/^# box-update [0-9a-f]\{64\} \([0-9a-f]\{40\}\) .*/\1/p' "$cb" | tail -1)
   [ -n "$rec" ] || cb_prev=1
@@ -231,7 +255,7 @@ cb_edit=
 : >"$tmp/cb.own"
 : >"$tmp/cb.lost"
 if [ -n "$rec" ]; then
-  grep -v '^# box-update ' "$cb" >"$tmp/cb.cur" || true
+  { grep -v '^# box-update ' "$cb" || true; } | cb_fold - >"$tmp/cb.cur"
   if [ "$(cb_sum "$tmp/cb.cur")" != "$rec" ]; then
     { [ -n "$frev" ] && git -C "$clone" show "$frev:template/$cb" 2>/dev/null || cat "$t/$cb"; } >"$tmp/cb.tpl"
     name=$(val '^name: \(.*\)-claude$') cb_net=$(val '^  default: \(.*\)$') \
@@ -270,6 +294,15 @@ printf '# box-update %s %s — сумма строк образца без ст�
 cb_carried=$(cut -f2- "$tmp/cb.own" | grep -vxF -f "$tmp/cb.lost" || true)
 cb_stop=
 [ -z "$cb_edit" ] && [ ! -s "$tmp/cb.lost" ] || cb_stop=1
+# собранный файл разбирает Compose — и с --force: файл, который Compose не читает, Claude проекта не запустит
+if ! docker compose -f "$tmp/cb" --project-directory . --profile '*' config -q --no-env-resolution 2>"$tmp/compose.err"; then
+  say "собранный $cb не разбирается docker compose config — обновление остановлено без правок:"
+  sed 's/^/  /' "$tmp/compose.err"
+  say "что собрал box-update:"
+  diff -u --label "$cb сейчас" --label "$cb от box-update" "$cb" "$tmp/cb" 2>/dev/null | sed 's/^/  /' || true
+  say "запиши в $cb значения CLAUDE_BOX_ALLOW и ANTHROPIC_MODEL одной строкой каждое, сверь свои строки с разницей и запусти box-update снова"
+  exit 1
+fi
 
 # правки проекта в файлах agent-box: сумма разошлась, файл убран или добавлен в папку box-*
 edits=()
