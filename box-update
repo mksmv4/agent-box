@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# Обновление обвязки agent-box в проекте: файлы agent-box — свежей копией из последнего коммита клона, заготовки — на первом запуске,
+# Подключение проекта к agent-box и обновление обвязки в нём: файлы agent-box — свежей копией из последнего коммита клона, заготовки — при подключении,
 # недостающие строки .gitignore и .gitattributes и правила запрета .claude/settings.json; манифест сумм и коммит.
-# Запуск на хосте в корне проекта: box-update [--force]; команду ставит ./agent-loop.sh в папке клона ссылкой в ~/.local/bin.
+# Запуск на хосте в корне проекта: box-connect [--force] — подключение, box-update [--force] — обновление подключённого проекта;
+# одна программа, дело — по имени команды: box-connect в клоне — ссылка на box-update. Команды ставит ./agent-loop.sh в папке клона ссылками в ~/.local/bin.
+# Подключённый проект — с манифестом: box-connect в нём и box-update без него — остановка с именем нужной команды.
 # Файлы agent-box — docs/PROTOCOL.md, .claude/context-guard.conf, папки .claude/skills/box-*/; их суммы и коммит клона — манифест .claude/agent-box.sha256.
 # Файл agent-box, правленный в проекте, останавливает обновление без правок; --force кладёт свежую копию поверх правки.
 # claude-box.yml — сервис claude этой машины, вне git: собирается из образца и docker compose config проекта, сумма строк образца и коммит — последней строкой файла;
@@ -13,7 +15,10 @@
 # Код выхода: 0 — обновлено или нечего обновлять; 1 — остановка без правок; 2 — неверный запуск или нет нужной команды.
 set -euo pipefail
 
-say() { printf 'box-update: %s\n' "$*"; }
+# имя команды — дело: box-connect подключает, иначе — обновление
+me=$(basename "$0")
+[ "$me" = box-connect ] || me=box-update
+say() { printf '%s: %s\n' "$me" "$*"; }
 list() { printf '  %s\n' "$@"; }
 
 # git по репозиторию проекта: команда fsmonitor и хуки из его .git выключены — их может подложить агент контейнера
@@ -22,8 +27,8 @@ g() { git -c core.fsmonitor=false -c core.hooksPath=/dev/null "$@"; }
 force=
 case $# in
   0) ;;
-  1) [ "$1" = --force ] || { say "запуск: box-update [--force]"; exit 2; }; force=1 ;;
-  *) say "запуск: box-update [--force]"; exit 2 ;;
+  1) [ "$1" = --force ] || { say "запуск: $me [--force]"; exit 2; }; force=1 ;;
+  *) say "запуск: $me [--force]"; exit 2 ;;
 esac
 for cmd in git jq sha256sum tar docker; do
   command -v "$cmd" >/dev/null || { say "нет команды $cmd"; exit 2; }
@@ -36,23 +41,31 @@ if [ -f agent-loop.sh ] && [ -d template ]; then
   exit 1
 fi
 
-# проект — текущая папка: пустая становится git-репозиторием, с файлами без git — остановка
+# подключённый проект — папка с манифестом; first — подключение
+manifest=.claude/agent-box.sha256
+first= fresh=
+if [ "$me" = box-connect ]; then
+  if [ -f "$manifest" ]; then
+    say "проект уже подключён к agent-box — обновление обвязки: box-update"
+    exit 1
+  fi
+  first=1
+  # проект прежней схемы — задача сборки документации уже заведена: его заготовки — документы проекта
+  compgen -G 'docs/tasks/docs-*.md' >/dev/null || fresh=1
+elif [ ! -f "$manifest" ]; then
+  say "в папке нет $manifest — проект не подключён к agent-box: подключение — box-connect; запуск — в корне проекта"
+  exit 1
+fi
+
+# проект — текущая папка: при подключении пустая становится git-репозиторием, с файлами без git — остановка
 if [ ! -e .git ]; then
   if [ -n "$(ls -A)" ]; then
     say "в папке нет git-репозитория, а файлы есть: что уйдёт в git первым коммитом, решаешь ты."
-    say "сделай первый коммит проекта и запусти box-update снова; запуск — в корне проекта"
+    say "сделай первый коммит проекта и запусти $me снова; запуск — в корне проекта"
     exit 1
   fi
   g init -q
   say "пустая папка стала git-репозиторием"
-fi
-
-manifest=.claude/agent-box.sha256
-first= fresh=
-if [ ! -f "$manifest" ]; then
-  first=1
-  # проект прежней схемы — задача сборки документации уже заведена: его заготовки — документы проекта
-  compgen -G 'docs/tasks/docs-*.md' >/dev/null || fresh=1
 fi
 
 # чистое дерево; правки пользователя в таск-файлах — ответ на блокер, правка «Постановки» — остаются вне коммита
@@ -63,12 +76,12 @@ while IFS= read -r -d '' e; do
   case ${e:0:2} in R* | C* | ?R | ?C) IFS= read -r -d '' p; bad+=("$p") ;; esac
 done < <(g status --porcelain -z -uall)
 if ((${#bad[@]})); then
-  say "в проекте правки без коммита — закоммить их и запусти box-update снова:"
+  say "в проекте правки без коммита — закоммить их и запусти $me снова:"
   list "${bad[@]}"
   exit 1
 fi
 if [ -f .claude/settings.json ] && ! jq -e . .claude/settings.json >/dev/null 2>&1; then
-  say ".claude/settings.json — не JSON: правила запрета дописать некуда; почини файл и запусти box-update снова"
+  say ".claude/settings.json — не JSON: правила запрета дописать некуда; почини файл и запусти $me снова"
   exit 1
 fi
 
@@ -101,7 +114,7 @@ for p in $(cat "$tmp/box.list") $(cut -d' ' -f3 "$tmp/old.sums") $dirs .gitignor
   $(while IFS= read -r p; do [ -e "$p" ] || [ -L "$p" ] || echo "$p"; done <"$tmp/skel.list"); do
   case $(realpath -m -- "$p") in
     "$root"/*) ;;
-    *) say "путь ведёт ссылкой за папку проекта: $p — убери ссылку и запусти box-update снова"; exit 1 ;;
+    *) say "путь ведёт ссылкой за папку проекта: $p — убери ссылку и запусти $me снова"; exit 1 ;;
   esac
 done
 
@@ -183,7 +196,7 @@ cb_net= cb_svc= env_lines=
 if [ -n "$compose" ]; then
   if envkey COMPOSE_PROJECT_NAME; then
     say "в .env строка COMPOSE_PROJECT_NAME: она сильнее строки name: в claude-box.yml и вернёт Claude в проект основного compose-файла"
-    say "перенеси имя из этой строки в строку name: основного compose-файла и запусти box-update снова: проект сохранит имя, контейнеры и сеть"
+    say "перенеси имя из этой строки в строку name: основного compose-файла и запусти $me снова: проект сохранит имя, контейнеры и сеть"
     exit 1
   fi
   # все профили — сеть по умолчанию есть в выводе и у проекта, чьи сервисы все под профилями; файлы env_file сервисов не читаются
@@ -210,7 +223,7 @@ if [ -e "$cb" ]; then
   if ! docker compose -f "$cb" --profile '*' config --format json --no-env-resolution >"$tmp/cb.json" 2>"$tmp/compose.err"; then
     say "$cb не разбирается docker compose config — строки адресов и модели взять неоткуда:"
     sed 's/^/  /' "$tmp/compose.err"
-    say "почини файл и запусти box-update снова"
+    say "почини файл и запусти $me снова"
     exit 1
   fi
   env_lines=$(env_of "$tmp/cb.json")
@@ -298,9 +311,9 @@ cb_stop=
 if ! docker compose -f "$tmp/cb" --project-directory . --profile '*' config -q --no-env-resolution 2>"$tmp/compose.err"; then
   say "собранный $cb не разбирается docker compose config — обновление остановлено без правок:"
   sed 's/^/  /' "$tmp/compose.err"
-  say "что собрал box-update:"
-  diff -u --label "$cb сейчас" --label "$cb от box-update" "$cb" "$tmp/cb" 2>/dev/null | sed 's/^/  /' || true
-  say "запиши в $cb значения CLAUDE_BOX_ALLOW и ANTHROPIC_MODEL одной строкой каждое, сверь свои строки с разницей и запусти box-update снова"
+  say "что собрал $me:"
+  diff -u --label "$cb сейчас" --label "$cb от $me" "$cb" "$tmp/cb" 2>/dev/null | sed 's/^/  /' || true
+  say "запиши в $cb значения CLAUDE_BOX_ALLOW и ANTHROPIC_MODEL одной строкой каждое, сверь свои строки с разницей и запусти $me снова"
   exit 1
 fi
 
@@ -326,19 +339,19 @@ if ((${#edits[@]})) && [ -z "$force" ]; then
   say "файлы agent-box правлены в проекте — свежая копия легла бы поверх правки:"
   list "${edits[@]}"
   say "перенеси правку в docs/RULES.md правилом «вместо PROTOCOL.md § <раздел>: …» или «к /box-… шаг <N>: …»"
-  say "и запусти box-update --force: свежая копия ляжет поверх, прежний текст останется в истории git"
+  say "и запусти $me --force: свежая копия ляжет поверх, прежний текст останется в истории git"
   stop=1
 fi
 if [ -n "$cb_stop" ] && [ -z "$force" ]; then
   if [ -n "$cb_edit" ]; then
-    say "claude-box.yml: строки образца правлены руками — свежий файл лёг бы поверх правки; что изменит box-update:"
+    say "claude-box.yml: строки образца правлены руками — свежий файл лёг бы поверх правки; что изменит $me:"
   else
     say "claude-box.yml: строки образца, за которыми стоят твои строки, в новой версии agent-box изменены или убраны —"
-    say "куда поставить твои строки, решаешь ты; что изменит box-update:"
+    say "куда поставить твои строки, решаешь ты; что изменит $me:"
   fi
-  diff -u --label "$cb сейчас" --label "$cb от box-update" "$cb" "$tmp/cb" | sed 's/^/  /' || true
-  say "строки CLAUDE_BOX_ALLOW, ANTHROPIC_MODEL и свои строки сверх образца box-update переносит сам;"
-  say "с остальным запусти box-update --force: свежий файл ляжет, как в разнице выше, прежний останется рядом — claude-box.yml.old"
+  diff -u --label "$cb сейчас" --label "$cb от $me" "$cb" "$tmp/cb" | sed 's/^/  /' || true
+  say "строки CLAUDE_BOX_ALLOW, ANTHROPIC_MODEL и свои строки сверх образца $me переносит сам;"
+  say "с остальным запусти $me --force: свежий файл ляжет, как в разнице выше, прежний останется рядом — claude-box.yml.old"
   stop=1
 fi
 if ((${#rgone[@]})); then
@@ -346,12 +359,12 @@ if ((${#rgone[@]})); then
   list "${rgone[@]}"
   say "разделы нового протокола: $(paste -sd '|' "$tmp/heads.new" | sed 's/|/; /g')"
   say "скиллы: $(cd "$t/.claude/skills" && printf '/%s ' box-*)"
-  say "поправь правила под новую версию, закоммить и запусти box-update снова"
+  say "поправь правила под новую версию, закоммить и запусти $me снова"
   stop=1
 fi
 [ -z "$stop" ] || exit 1
 
-# первый запуск нового проекта: занятые имена заготовок, файлов agent-box и раздела по областям — в .old, .old2…
+# подключение нового проекта: занятые имена заготовок, файлов agent-box и раздела по областям — в .old, .old2…
 renamed=() hidden=()
 oldname() {
   local n=$1.old i=2
@@ -397,7 +410,7 @@ if ! cmp -s "$tmp/cb" "$cb"; then
   cp "$tmp/cb" "$cb"
 fi
 
-# заготовки — на первом запуске, только недостающие; при разделе по областям основной файл живёт в папке раздела
+# заготовки — при подключении, только недостающие; при разделе по областям основной файл живёт в папке раздела
 laid=()
 if [ -n "$first" ]; then
   while IFS= read -r p; do
@@ -526,7 +539,7 @@ fi
 cp "$tmp/manifest" "$manifest"
 
 # итог
-[ -z "$first" ] || { [ -n "$fresh" ] && say "первый запуск в проекте" || say "первый запуск в проекте прежней схемы: файлы agent-box — свежей копией, документы остаются как есть"; }
+[ -z "$first" ] || { [ -n "$fresh" ] && say "проект подключён к agent-box" || say "проект прежней схемы подключён к agent-box: файлы agent-box — свежей копией, документы остаются как есть"; }
 ((${#edits[@]} == 0)) || { say "правки проекта в файлах agent-box легли под свежую копию (--force):"; list "${edits[@]}"; }
 ((${#renamed[@]} == 0)) || { say "занятые имена переименованы:"; list "${renamed[@]}"; }
 new=() upd=() gone=()
@@ -556,3 +569,5 @@ g add -A -- . "${ex[@]}"
 g commit -q -m "chore(box): agent-box ${rev:0:7}"
 say "коммит $(g rev-parse --short HEAD) chore(box): agent-box ${rev:0:7}"
 ((${#keep[@]} == 0)) || { say "правки таск-файлов остались вне коммита:"; list "${keep[@]}"; }
+# подсказка нового проекта — последней строкой: сборку документации запускает человек
+[ -z "$fresh" ] || say "дальше — документация проекта: /box-init в Claude, запущенном в папке проекта"

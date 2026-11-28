@@ -2,7 +2,7 @@
 # Движок автоцикла: итерации /box-next по задаче проекта, пока статус таск-файла «в работе» или «блокер» с ответом пользователя.
 # Запуск на хосте из папки проекта: agent-loop.sh [--host | --no-firewall] [--api] [--quiet] [--resume <id>] <задача>; из любой папки — путём к таск-файлу: agent-loop.sh [--host | --no-firewall] [--api] [--quiet] [--resume <id>] <проект>/docs/tasks/<задача>.md
 # --resume <id> — первая итерация запуска продолжает сессию, оборванную сбоем сети, API или лимитом подписки; дальше цикл идёт свежими сессиями.
-# Первый раз на машине — ./agent-loop.sh в папке клона: скрипт ставит себя, box-connect и box-update командами ссылками в ~/.local/bin.
+# Первый раз на машине — ./agent-loop.sh в папке клона: скрипт ставит себя, box-connect, box-update и box-claude командами ссылками в ~/.local/bin.
 # Итерации идут в контейнере — сервисе claude из claude-box.yml проекта: сеть ограничена списком адресов, режим без вопросов о разрешениях;
 # --no-firewall — сеть контейнера открыта, режим auto; --host — итерации claude хоста в режиме auto.
 # --api — итерации на API-ключе из строки ANTHROPIC_API_KEY в ~/.config/agent-loop.env: расход идёт с API-кредитов организации Console; строки нет — отказ запуска.
@@ -105,17 +105,19 @@ sandbox_rule() {
   exit 0
 }
 
-# команды agent-loop.sh, box-connect и box-update по имени: ссылки на скрипты клона в ~/.local/bin; папки нет в PATH — запуск полным адресом.
+# команды agent-loop.sh, box-connect, box-update и box-claude по имени: ссылки на скрипты клона в ~/.local/bin; папки нет в PATH — запуск полным адресом.
 # Ссылки от перенесённого клона заменяются. me — команда запуска в подсказках движка; self — сам скрипт в клоне, рядом с ним конфиг
 me=agent-loop.sh
 self=$(realpath "$0")
-if ! command -v agent-loop.sh >/dev/null || ! command -v box-connect >/dev/null || ! command -v box-update >/dev/null; then
+if ! command -v agent-loop.sh >/dev/null || ! command -v box-connect >/dev/null || ! command -v box-update >/dev/null ||
+  ! command -v box-claude >/dev/null; then
   case ":$PATH:" in
     *":$HOME/.local/bin:"*)
       mkdir -p ~/.local/bin && ln -sf "$self" ~/.local/bin/agent-loop.sh &&
         ln -sf "$(dirname "$self")"/box-connect ~/.local/bin/box-connect &&
         ln -sf "$(dirname "$self")"/box-update ~/.local/bin/box-update &&
-        say "agent-loop.sh, box-connect и box-update теперь запускаются по имени из любой папки" ;;
+        ln -sf "$(dirname "$self")"/box-claude ~/.local/bin/box-claude &&
+        say "agent-loop.sh, box-connect, box-update и box-claude теперь запускаются по имени из любой папки" ;;
     *)
       me=$self
       say "папки ~/.local/bin нет в PATH — запуск полным адресом" ;;
@@ -216,7 +218,7 @@ say "пределы цикла${own:+ из $conf: $own}${own:+${def:+;}}${def:+ 
 
 # сервис claude — в claude-box.yml проекта явным -f: контейнер собирается только по нему, основной compose-файл проекта, дополнения и COMPOSE_FILE из .env в сборку не входят
 cf=claude-box.yml
-[ -n "$host" ] || [ -f "$cf" ] || stop 2 "нет $cf в корне проекта — его собирает box-update в папке проекта; итерации на хосте — $me --host $target"
+[ -n "$host" ] || [ -f "$cf" ] || stop 2 "нет $cf в корне проекта — его собирают box-connect при подключении проекта и box-update при обновлении; итерации на хосте — $me --host $target"
 
 # режим итераций: в контейнере без --no-firewall — точка входа claude-box-firewall ограничивает сеть, и вопросов о разрешениях нет
 mode=auto

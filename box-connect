@@ -1,11 +1,1 @@
-#!/usr/bin/env bash
-# Claude в контейнере проекта — сервис claude из claude-box.yml в папке проекта, тот же, что у итераций движка.
-# Запуск на хосте из папки проекта: box-connect; команду ставит ./agent-loop.sh в папке клона ссылкой в ~/.local/bin.
-# claude-box.yml собирает box-update в папке проекта: нет файла — подсказка и код 1.
-set -eu
-
-[ -f claude-box.yml ] || {
-  echo "box-connect: в этой папке нет claude-box.yml — его собирает box-update: запусти box-update в папке проекта, потом снова box-connect" >&2
-  exit 1
-}
-exec docker compose -f claude-box.yml run --rm claude
+box-update
