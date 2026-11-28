@@ -11,7 +11,8 @@
 # --force кладёт свежий файл, прежний — в claude-box.yml.old. Значения адресов и модели — разбором YAML (docker compose config), в свежем файле — одной строкой;
 # прежний или собранный файл, который Compose не разбирает, останавливает обновление.
 # Строки хаба, docs/RULES.md и docs/rules/ со ссылкой на раздел протокола или скилл box-* — правила проекта поверх agent-box: итог их называет,
-# раздел или скилл, пропавший в новой версии, останавливает обновление. Итог с коммитом — записи журнала agent-box о правках template/ с прошлой версии.
+# раздел или скилл, пропавший в новой версии, останавливает обновление. Итог обновления — записи журнала agent-box о правках template/ с прошлой версии.
+# Файлы agent-box и манифест под .gitignore проекта ложатся без коммита: итог называет их и строку «коммита нет».
 # Код выхода: 0 — обновлено или нечего обновлять; 1 — остановка без правок; 2 — неверный запуск или нет нужной команды.
 set -euo pipefail
 
@@ -317,12 +318,13 @@ if ! docker compose -f "$tmp/cb" --project-directory . --profile '*' config -q -
   exit 1
 fi
 
-# правки проекта в файлах agent-box: сумма разошлась, файл убран или добавлен в папку box-*
+# правки проекта в файлах agent-box: сумма разошлась, файл убран или добавлен в папку box-*; файл, уже равный свежей копии,
+# и убранный файл, которого нет и в образце, — не правка: так манифест, отставший от файлов, свежую копию не останавливает
 edits=()
 while read -r sum p; do
   if [ ! -f "$p" ]; then
-    edits+=("$p — убран")
-  elif [ "$(sha256sum <"$p" | cut -c1-64)" != "$sum" ]; then
+    [ ! -f "$t/$p" ] || edits+=("$p — убран")
+  elif [ "$(sha256sum <"$p" | cut -c1-64)" != "$sum" ] && ! cmp -s "$p" "$t/$p"; then
     edits+=("$p — изменён")
   fi
 done <"$tmp/old.sums"
@@ -330,7 +332,7 @@ if [ -z "$first" ]; then
   for d in $dirs; do
     [ -d "$d" ] || continue
     while IFS= read -r p; do
-      cut -d' ' -f3 "$tmp/old.sums" | grep -qxF -- "$p" || edits+=("$p — добавлен")
+      cut -d' ' -f3 "$tmp/old.sums" | grep -qxF -- "$p" || cmp -s "$p" "$t/$p" || edits+=("$p — добавлен")
     done < <(find "$d" -type f | LC_ALL=C sort)
   done
 fi
@@ -480,11 +482,26 @@ else
   fi
 fi
 
-# манифест: коммит клона и суммы файлов agent-box
+# манифест: коммит клона и суммы файлов agent-box — до сверки с git: у проекта, чей .gitignore закрывает .claude/,
+# git свежих файлов не видит, а по манифесту следующий запуск сверяет файлы; суммы те же — манифест прежний:
+# коммит в нём — версия, с которой файлы agent-box легли в последний раз
 {
   printf '# agent-box %s\n' "$rev"
   xargs -d '\n' sha256sum <"$tmp/box.list"
 } >"$tmp/manifest"
+mf_new=
+if ! grep -v '^#' "$tmp/manifest" | cmp -s - "$tmp/old.sums"; then
+  cp "$tmp/manifest" "$manifest"
+  mf_new=1
+fi
+new=() upd=() gone=()
+for u in $units; do
+  a=$(unit_sum "$u")
+  if [ -z "${before[$u]}" ] && [ -n "$a" ]; then new+=("$u")
+  elif [ -n "${before[$u]}" ] && [ -z "$a" ]; then gone+=("$u")
+  elif [ "${before[$u]}" != "$a" ]; then upd+=("$u")
+  fi
+done
 
 # итог по claude-box.yml — и без коммита: файл вне git
 cb_report() {
@@ -527,32 +544,25 @@ changes_report() {
   [ ! -s "$tmp/bare" ] || { list "коммиты без записи журнала:"; xargs git -C "$clone" log --no-walk=unsorted --format='    %h %s' <"$tmp/bare"; }
 }
 
-# правки обновления — без таск-файлов пользователя и манифеста; правок нет и манифест есть — коммита нет
+# правки обновления в git — без таск-файлов пользователя; ни правок в git, ни новых файлов agent-box, манифеста и правил — «обвязка свежая»
 ex=()
 for p in "${keep[@]}"; do ex+=(":(exclude,literal)$p"); done
-if [ -z "$first" ] && [ -z "$(g status --porcelain -uall -- . "${ex[@]}" ":(exclude,literal)$manifest")" ]; then
+dirty=$(g status --porcelain -uall -- . "${ex[@]}")
+if [ -z "$first$dirty$mf_new$rules_in$rules_out" ] && ((${#new[@]} + ${#upd[@]} + ${#gone[@]} == 0)); then
   say "обвязка свежая — agent-box ${rev:0:7}, правок нет, коммита нет"
   cb_report
   rules_report
   exit 0
 fi
-cp "$tmp/manifest" "$manifest"
 
 # итог
 [ -z "$first" ] || { [ -n "$fresh" ] && say "проект подключён к agent-box" || say "проект прежней схемы подключён к agent-box: файлы agent-box — свежей копией, документы остаются как есть"; }
 ((${#edits[@]} == 0)) || { say "правки проекта в файлах agent-box легли под свежую копию (--force):"; list "${edits[@]}"; }
 ((${#renamed[@]} == 0)) || { say "занятые имена переименованы:"; list "${renamed[@]}"; }
-new=() upd=() gone=()
-for u in $units; do
-  a=$(unit_sum "$u")
-  if [ -z "${before[$u]}" ] && [ -n "$a" ]; then new+=("$u")
-  elif [ -n "${before[$u]}" ] && [ -z "$a" ]; then gone+=("$u")
-  elif [ "${before[$u]}" != "$a" ]; then upd+=("$u")
-  fi
-done
 ((${#new[@]} == 0)) || { say "файлы agent-box легли впервые:"; list "${new[@]}"; }
 ((${#upd[@]} == 0)) || { say "файлы agent-box обновлены:"; list "${upd[@]}"; }
 ((${#gone[@]} == 0)) || { say "файлы agent-box убраны — их нет в новой версии:"; list "${gone[@]}"; }
+[ -z "$mf_new" ] || [ -n "$first" ] || ((${#new[@]} + ${#upd[@]} + ${#gone[@]})) || say "манифест обновлён: файлы agent-box уже совпадали со свежей копией"
 ((${#laid[@]} == 0)) || { say "заготовки легли:"; list "${laid[@]}"; }
 cb_report
 for f in .gitignore .gitattributes; do
@@ -560,14 +570,19 @@ for f in .gitignore .gitattributes; do
 done
 [ -z "$rules_in" ] || say ".claude/settings.json, правила запрета дописаны: $rules_in"
 [ -z "$rules_out" ] || say ".claude/settings.json, правила прежнего образца убраны: $rules_out"
-ign=$({ cat "$tmp/box.list"; printf '%s\n' "${laid[@]}" "$manifest"; } | g check-ignore --stdin || true)
+ign=$({ cat "$tmp/box.list"; printf '%s\n' "${laid[@]}" "$manifest"; [ -z "$rules_in$rules_out" ] || echo .claude/settings.json; } |
+  g check-ignore --stdin || true)
 [ -z "$ign" ] || { say "под .gitignore проекта — в git не попадут:"; list $ign; }
 rules_report
 changes_report
 
-g add -A -- . "${ex[@]}"
-g commit -q -m "chore(box): agent-box ${rev:0:7}"
-say "коммит $(g rev-parse --short HEAD) chore(box): agent-box ${rev:0:7}"
-((${#keep[@]} == 0)) || { say "правки таск-файлов остались вне коммита:"; list "${keep[@]}"; }
+if [ -n "$dirty" ]; then
+  g add -A -- . "${ex[@]}"
+  g commit -q -m "chore(box): agent-box ${rev:0:7}"
+  say "коммит $(g rev-parse --short HEAD) chore(box): agent-box ${rev:0:7}"
+  ((${#keep[@]} == 0)) || { say "правки таск-файлов остались вне коммита:"; list "${keep[@]}"; }
+else
+  say "коммита нет: правки обновления — под .gitignore проекта, в git ничего не ушло"
+fi
 # подсказка нового проекта — последней строкой: сборку документации запускает человек
 [ -z "$fresh" ] || say "дальше — документация проекта: /box-init в Claude, запущенном в папке проекта"
